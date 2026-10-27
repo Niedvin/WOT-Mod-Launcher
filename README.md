@@ -14,7 +14,7 @@
 5. кожен пакет перевіряється за SHA-256, розміром і `meta.xml` (`<id>`); перед заміною створюється бекап у `<гра>\.backups\launcher\`, при збої старі файли відновлюються;
 6. лаунчер також вміє оновлювати сам себе та переносити моди в нову папку версії гри після патчу клієнта.
 
-## Склад модпаку (реліз 2026.10.24, клієнт 2.4.1.0)
+## Склад модпаку (реліз 2026.10.27, клієнт 2.4.1.0)
 
 | Мод | Версія |
 |---|---|
@@ -24,8 +24,9 @@
 | ModsSettings API (Izeberg) | 1.7.1 |
 | ModsList API (Poliroid) | 1.8.0 |
 | OpenWG Core & Fixes (4 пакети) | 2.1.2 / 1.8.1 / 1.0.5 / 1.2.2 |
-| Spectator Teammate HUD | 1.0.5 |
-| Background FPS Limiter | 1.0.0 |
+| Spectator Teammate HUD | 1.0.6 |
+| Background FPS Limiter | 1.0.3 |
+| Research Button | 1.2.0 |
 
 ## Завантаження
 
@@ -37,9 +38,9 @@
 ```json
 {
   "schema": 1,
-  "pack_version": "2026.10.24",
+  "pack_version": "2026.10.27",
   "game_version": "2.4.1.0",
-  "launcher": { "version": "1.0.0", "url": ".../WotModLauncher.exe", "sha256": "..." },
+  "launcher": { "version": "1.1.0", "url": ".../WotModLauncher.exe", "sha256": "..." },
   "mods": [
     { "id": "ua.server_online_autoconnect", "title": "Server Online & Autoconnect",
       "version": "1.1.1", "file": "ua.server_online_autoconnect_1.1.1.wotmod",
@@ -60,3 +61,7 @@
 Новий реліз: тег `pack-YYYY.MM.DD`, ассети — усе з `build/release_assets/` (усі `.wotmod`, `WotModLauncher.exe`, `manifest.json`, `WoT_Modpack_by_Niedvin.zip`).
 
 Автор: **Niedvin** (2026)
+
+## Development
+
+Source for all 6 Niedvin mods, native focus helper, build scripts and research artwork is included under `src/mods/` and `src/build/`. See [build instructions](docs/BUILD.md) and [research design validation](docs/research-button-design-qa.md).

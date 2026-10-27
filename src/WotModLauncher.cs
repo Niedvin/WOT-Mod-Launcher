@@ -20,8 +20,8 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("Niedvin")]
 [assembly: AssemblyProduct("WoT Modpack by Niedvin")]
 [assembly: AssemblyCopyright("Copyright © 2026 Niedvin")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
-[assembly: AssemblyVersion("1.0.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyVersion("1.1.0.0")]
 
 namespace WotModLauncher
 {
@@ -29,6 +29,7 @@ namespace WotModLauncher
     {
         public string game_path { get; set; }
         public bool hijack_shortcuts { get; set; }
+        public string manifest_url { get; set; }
     }
 
     public class ManifestLauncherInfo
@@ -73,7 +74,9 @@ namespace WotModLauncher
         public const string RepoOwner = "Niedvin";
         public const string RepoName = "WOT-Mod-Launcher";
         public const string ManifestUrl = "https://github.com/Niedvin/WOT-Mod-Launcher/releases/latest/download/manifest.json";
-        public const string LauncherVersion = "1.0.0";
+        public const string LauncherVersion = "1.1.0";
+        public static string ManifestOverride;
+        public static string ManifestLocalDir;
 
         public static string LauncherDir
         {
@@ -91,11 +94,14 @@ namespace WotModLauncher
             CleanupSelfUpdateOldBinary();
 
             bool checkOnly = false;
+            bool updateOnly = false;
             string argGamePath = null;
             for (int i = 0; i < args.Length; i++)
             {
                 if (args[i] == "--check-only") checkOnly = true;
+                else if (args[i] == "--update-only") updateOnly = true;
                 else if (args[i] == "--game" && i + 1 < args.Length) argGamePath = args[++i];
+                else if (args[i] == "--manifest" && i + 1 < args.Length) ManifestOverride = args[++i];
             }
 
             if (!checkOnly && IsGameAlreadyRunning())
@@ -104,10 +110,13 @@ namespace WotModLauncher
             LauncherConfig cfg = LoadConfig(argGamePath);
             if (cfg == null || string.IsNullOrEmpty(cfg.game_path) || !Directory.Exists(cfg.game_path))
             {
-                if (!checkOnly && !string.IsNullOrEmpty(argGamePath))
+                if (!checkOnly && !updateOnly && !string.IsNullOrEmpty(argGamePath))
                     LaunchGame(argGamePath);
                 return 1;
             }
+
+            if (string.IsNullOrEmpty(ManifestOverride) && !string.IsNullOrEmpty(cfg.manifest_url))
+                ManifestOverride = cfg.manifest_url;
 
             if (cfg.hijack_shortcuts)
                 EnsureShortcutsRedirected(cfg.game_path);
@@ -119,9 +128,10 @@ namespace WotModLauncher
             ManifestRoot manifest = FetchManifestWithTimeout(4000);
             if (manifest != null)
             {
-                TryStageSelfUpdate(manifest.launcher);
+                if (!checkOnly)
+                    TryStageSelfUpdate(manifest.launcher);
                 List<PendingModUpdate> updates = FindPendingUpdates(cfg.game_path, gameVer, manifest);
-                if (updates.Count > 0)
+                if (updates.Count > 0 && !checkOnly)
                 {
                     using (var form = new UpdateDialogForm(cfg.game_path, gameVer, updates))
                     {
@@ -130,7 +140,7 @@ namespace WotModLauncher
                 }
             }
 
-            if (!checkOnly)
+            if (!checkOnly && !updateOnly)
                 LaunchGame(cfg.game_path);
 
             return 0;
@@ -258,9 +268,37 @@ namespace WotModLauncher
 
         private static ManifestRoot FetchManifestWithTimeout(int timeoutMs)
         {
+            string target = ManifestUrl;
+            if (!string.IsNullOrEmpty(ManifestOverride))
+            {
+                string p = ManifestOverride;
+                if (p.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+                {
+                    try { p = new Uri(p).LocalPath; }
+                    catch { return null; }
+                }
+                if (p.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || p.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                {
+                    target = p;
+                }
+                else
+                {
+                    if (!File.Exists(p) && Directory.Exists(p))
+                        p = Path.Combine(p, "manifest.json");
+                    if (!File.Exists(p)) return null;
+                    try
+                    {
+                        ManifestLocalDir = Path.GetDirectoryName(Path.GetFullPath(p));
+                        var serLocal = new JavaScriptSerializer();
+                        return serLocal.Deserialize<ManifestRoot>(File.ReadAllText(p, Encoding.UTF8));
+                    }
+                    catch { return null; }
+                }
+            }
+
             try
             {
-                HttpWebRequest req = (HttpWebRequest)WebRequest.Create(ManifestUrl + "?t=" + Environment.TickCount);
+                HttpWebRequest req = (HttpWebRequest)WebRequest.Create(target + "?t=" + Environment.TickCount);
                 req.UserAgent = "WotModLauncher/" + LauncherVersion;
                 req.Timeout = timeoutMs;
                 req.ReadWriteTimeout = timeoutMs;
@@ -292,15 +330,23 @@ namespace WotModLauncher
 
                 string exe = Assembly.GetExecutingAssembly().Location;
                 string tmp = exe + ".new";
-                HttpWebRequest req = (HttpWebRequest)WebRequest.Create(info.url);
-                req.UserAgent = "WotModLauncher/" + LauncherVersion;
-                req.Timeout = 8000;
-                req.ReadWriteTimeout = 8000;
-                using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
-                using (Stream s = resp.GetResponseStream())
-                using (FileStream fs = File.Create(tmp))
+                string localSrc = ResolveLocalUrl(info.url);
+                if (localSrc != null)
                 {
-                    s.CopyTo(fs);
+                    File.Copy(localSrc, tmp, true);
+                }
+                else
+                {
+                    HttpWebRequest req = (HttpWebRequest)WebRequest.Create(info.url);
+                    req.UserAgent = "WotModLauncher/" + LauncherVersion;
+                    req.Timeout = 8000;
+                    req.ReadWriteTimeout = 8000;
+                    using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
+                    using (Stream s = resp.GetResponseStream())
+                    using (FileStream fs = File.Create(tmp))
+                    {
+                        s.CopyTo(fs);
+                    }
                 }
                 if (!string.IsNullOrEmpty(info.sha256) && !VerifySha256(tmp, info.sha256))
                 {
@@ -375,6 +421,25 @@ namespace WotModLauncher
             if (string.IsNullOrEmpty(s)) return null;
             Version v;
             return Version.TryParse(s.TrimStart('v', 'V'), out v) ? v : null;
+        }
+
+        public static string ResolveLocalUrl(string url)
+        {
+            if (string.IsNullOrEmpty(url)) return null;
+            string p = url;
+            try
+            {
+                if (p.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+                    p = new Uri(p).LocalPath;
+            }
+            catch { return null; }
+            if (File.Exists(p)) return p;
+            if (!string.IsNullOrEmpty(ManifestLocalDir))
+            {
+                string cand = Path.Combine(ManifestLocalDir, p.Replace('/', Path.DirectorySeparatorChar));
+                if (File.Exists(cand)) return cand;
+            }
+            return null;
         }
 
         public static bool VerifySha256(string filePath, string expectedHex)
@@ -526,7 +591,6 @@ namespace WotModLauncher
         private Rectangle rectBtnSkip;
         private Rectangle rectProgressBar;
 
-        // Pre-allocated GDI+ resources keep 60 FPS OnPaint zero-alloc — 2026-10-24
         private readonly Font fontTitle = new Font("Segoe UI", 13.5f, FontStyle.Bold, GraphicsUnit.Point);
         private readonly Font fontSubtitle = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
         private readonly Font fontModTitle = new Font("Segoe UI", 10f, FontStyle.Bold, GraphicsUnit.Point);
@@ -984,6 +1048,14 @@ namespace WotModLauncher
 
         private void DownloadFileWithProgress(string url, string dstPath, int index, int total)
         {
+            string localSrc = Program.ResolveLocalUrl(url);
+            if (localSrc != null)
+            {
+                File.Copy(localSrc, dstPath, true);
+                if (total > 0) targetProgress = 8f + ((index + 1f) * 85f / total);
+                return;
+            }
+
             HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
             req.UserAgent = "WotModLauncher/" + Program.LauncherVersion;
             req.Timeout = 15000;

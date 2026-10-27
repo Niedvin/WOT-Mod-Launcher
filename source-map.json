@@ -1,0 +1,31 @@
+{
+  "files": {
+    "src/WotModLauncher.cs": "scratch/WotModLauncher.cs",
+    "src/Installer.cs": "scratch/Installer.cs",
+    "src/publish_release.py": "scratch/publish_release.py",
+    "src/build/build_mods.py": "scratch/build_mods.py",
+    "src/build/build_installer.py": "scratch/build_installer.py",
+    "src/build/stage_mods.py": "scratch/stage_mods.py",
+    "src/build/app.manifest": "scratch/app.manifest",
+    "src/build/app.ico": "scratch/app.ico",
+    "src/mods/research_button/build.py": "scratch/research_btn/build.py",
+    "src/mods/research_button/mono_build.py": "scratch/research_btn/mono_build.py",
+    "src/mods/research_button/mod_research_button.py": "scratch/research_btn/mod_research_button.py",
+    "src/mods/research_button/research_action.png": "scratch/research_btn/research_action.png",
+    "src/mods/background_fps_limiter/build.py": "scratch/background_fps/build.py",
+    "src/mods/background_fps_limiter/build_native_focus.py": "scratch/background_fps/build_native_focus.py",
+    "src/mods/background_fps_limiter/window_focus.c": "scratch/background_fps/window_focus.c",
+    "src/mods/background_fps_limiter/mod_background_fps_limiter.py": "scratch/background_fps/mod_background_fps_limiter.py",
+    "src/mods/spectator_teammate_hud/build.py": "scratch/spectator_hud/build.py",
+    "src/mods/spectator_teammate_hud/deploy.py": "scratch/spectator_hud/deploy.py",
+    "src/mods/spectator_teammate_hud/mod_spectator_teammate_hud.py": "scratch/spectator_hud/mod_spectator_teammate_hud.py",
+    "src/mods/spectator_teammate_hud/hud_adapter.py": "scratch/spectator_hud/hud_adapter.py",
+    "src/mods/spectator_teammate_hud/spectator_aim.py": "scratch/spectator_hud/spectator_aim.py",
+    "src/mods/spectator_teammate_hud/teammate_tracker.py": "scratch/spectator_hud/teammate_tracker.py",
+    "src/mods/server_online/mod_server_online_autoconnect.py": "mods/configs/server_online/mod_server_online_autoconnect.py",
+    "src/mods/platoon_autostart/mod_platoon_autostart.py": "mods/configs/platoon_autostart/mod_platoon_autostart.py",
+    "src/mods/armor_flashlight/mod_armor_flashlight_brightness.py": "mods/configs/armor_flashlight/mod_armor_flashlight_brightness.py",
+    "src/mods/platoon_autostart/MembersWindow.css": "scratch/platoon_ui_edit/MembersWindow.css",
+    "src/mods/platoon_autostart/MembersWindow.js": "scratch/platoon_ui_edit/MembersWindow.js"
+  }
+}

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.IO.Compression;
 using System.Net;
@@ -63,20 +64,22 @@ namespace WotModpackInstaller
         private Label lblHeaderTitle;
         private Label lblHeaderSubtitle;
 
-        private GroupBox grpGamePath;
+        private SectionPanel grpGamePath;
         private TextBox txtGamePath;
         private Button btnBrowse;
         private Label lblGameStatus;
 
-        private GroupBox grpMods;
+        private SectionPanel grpMods;
         private CheckedListBox chkListMods;
         private Button btnSelectAll;
         private Button btnDeselectAll;
+        private Label lblModCounter;
+        private Label lblRequiredNote;
         private Label lblModDetailsTitle;
         private Label lblModDetailsMeta;
         private TextBox txtModDescription;
 
-        private GroupBox grpOptions;
+        private SectionPanel grpOptions;
         private CheckBox chkCleanOld;
         private CheckBox chkBackup;
         private CheckBox chkInstallLauncher;
@@ -96,6 +99,7 @@ namespace WotModpackInstaller
         private string detectedGameVersion = "2.4.1.0";
         private string modsRootPath = "";
         private ManualResetEvent prefetchDone = new ManualResetEvent(false);
+        private static string payloadDir;
 
         public MainForm()
         {
@@ -111,56 +115,63 @@ namespace WotModpackInstaller
         private void InitializeComponent()
         {
             this.Text = "WoT Modpack by Niedvin — Інсталятор модів";
-            this.Size = new Size(860, 720);
+            this.ClientSize = new Size(856, 748);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
             this.Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
-            this.BackColor = Color.FromArgb(246, 248, 250);
+            this.BackColor = Color.FromArgb(20, 25, 38);
+            this.DoubleBuffered = true;
 
             headerPanel = new Panel();
             headerPanel.Dock = DockStyle.Top;
-            headerPanel.Height = 70;
-            headerPanel.BackColor = Color.FromArgb(24, 32, 45);
+            headerPanel.Height = 84;
+            headerPanel.BackColor = Color.FromArgb(15, 19, 29);
+            headerPanel.Paint += (s, e) =>
+            {
+                using (var br = new SolidBrush(Color.FromArgb(229, 160, 40)))
+                    e.Graphics.FillRectangle(br, 0, headerPanel.Height - 2, headerPanel.Width, 2);
+            };
 
             lblHeaderTitle = new Label();
             lblHeaderTitle.Text = "WORLD OF TANKS — MODPACK";
-            lblHeaderTitle.Font = new Font("Segoe UI", 14F, FontStyle.Bold, GraphicsUnit.Point);
+            lblHeaderTitle.Font = new Font("Segoe UI", 15F, FontStyle.Bold, GraphicsUnit.Point);
             lblHeaderTitle.ForeColor = Color.White;
-            lblHeaderTitle.Location = new Point(20, 12);
+            lblHeaderTitle.Location = new Point(24, 16);
             lblHeaderTitle.AutoSize = true;
 
             lblHeaderSubtitle = new Label();
-            lblHeaderSubtitle.Text = "Збірка модифікацій від Niedvin • Автоматичний пошук гри та встановлення";
+            lblHeaderSubtitle.Text = "Збірка модифікацій від Niedvin • інсталятор з лаунчером автооновлення через GitHub";
             lblHeaderSubtitle.Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
-            lblHeaderSubtitle.ForeColor = Color.FromArgb(218, 165, 32);
-            lblHeaderSubtitle.Location = new Point(22, 40);
+            lblHeaderSubtitle.ForeColor = Color.FromArgb(229, 160, 40);
+            lblHeaderSubtitle.Location = new Point(26, 52);
             lblHeaderSubtitle.AutoSize = true;
 
             headerPanel.Controls.Add(lblHeaderTitle);
             headerPanel.Controls.Add(lblHeaderSubtitle);
             this.Controls.Add(headerPanel);
 
-            grpGamePath = new GroupBox();
-            grpGamePath.Text = " Папка гри World of Tanks ";
-            grpGamePath.Location = new Point(15, 80);
-            grpGamePath.Size = new Size(815, 80);
-            grpGamePath.ForeColor = Color.FromArgb(30, 40, 55);
+            grpGamePath = new SectionPanel("Папка гри World of Tanks");
+            grpGamePath.Location = new Point(16, 100);
+            grpGamePath.Size = new Size(824, 92);
 
             txtGamePath = new TextBox();
-            txtGamePath.Location = new Point(15, 24);
-            txtGamePath.Size = new Size(680, 25);
+            txtGamePath.Location = new Point(14, 32);
+            txtGamePath.Size = new Size(668, 25);
+            txtGamePath.BackColor = Color.FromArgb(35, 43, 61);
+            txtGamePath.ForeColor = Color.White;
+            txtGamePath.BorderStyle = BorderStyle.FixedSingle;
             txtGamePath.TextChanged += (s, e) => ValidateGamePath();
 
-            btnBrowse = new Button();
-            btnBrowse.Text = "Огляд...";
-            btnBrowse.Location = new Point(705, 23);
-            btnBrowse.Size = new Size(95, 27);
+            btnBrowse = MakeButton("Огляд...", Color.FromArgb(39, 48, 67), Color.FromArgb(233, 237, 245), false);
+            btnBrowse.Location = new Point(692, 31);
+            btnBrowse.Size = new Size(112, 27);
             btnBrowse.Click += BtnBrowse_Click;
 
             lblGameStatus = new Label();
-            lblGameStatus.Location = new Point(15, 53);
-            lblGameStatus.Size = new Size(780, 20);
+            lblGameStatus.Location = new Point(14, 64);
+            lblGameStatus.Size = new Size(792, 20);
+            lblGameStatus.ForeColor = Color.FromArgb(150, 162, 186);
             lblGameStatus.Text = "Пошук гри...";
 
             grpGamePath.Controls.Add(txtGamePath);
@@ -168,97 +179,117 @@ namespace WotModpackInstaller
             grpGamePath.Controls.Add(lblGameStatus);
             this.Controls.Add(grpGamePath);
 
-            grpMods = new GroupBox();
-            grpMods.Text = " Вибір модифікацій для встановлення ";
-            grpMods.Location = new Point(15, 170);
-            grpMods.Size = new Size(815, 220);
-            grpMods.ForeColor = Color.FromArgb(30, 40, 55);
+            grpMods = new SectionPanel("Модифікації");
+            grpMods.Location = new Point(16, 202);
+            grpMods.Size = new Size(824, 242);
+
+            lblModCounter = new Label();
+            lblModCounter.Location = new Point(520, 8);
+            lblModCounter.Size = new Size(290, 18);
+            lblModCounter.TextAlign = ContentAlignment.MiddleRight;
+            lblModCounter.ForeColor = Color.FromArgb(229, 160, 40);
+            lblModCounter.Font = new Font("Segoe UI", 9F, FontStyle.Bold, GraphicsUnit.Point);
+            lblModCounter.Text = "Вибрано: 0 з 0";
 
             chkListMods = new CheckedListBox();
-            chkListMods.Location = new Point(15, 25);
-            chkListMods.Size = new Size(460, 150);
+            chkListMods.Location = new Point(14, 32);
+            chkListMods.Size = new Size(470, 156);
             chkListMods.CheckOnClick = true;
+            chkListMods.BorderStyle = BorderStyle.FixedSingle;
             chkListMods.SelectedIndexChanged += ChkListMods_SelectedIndexChanged;
+            chkListMods.ItemCheck += (s, e) => BeginInvoke(new Action(UpdateModCounter));
 
-            btnSelectAll = new Button();
-            btnSelectAll.Text = "Вибрати всі";
-            btnSelectAll.Location = new Point(15, 182);
-            btnSelectAll.Size = new Size(110, 28);
+            btnSelectAll = MakeButton("Вибрати всі", Color.FromArgb(39, 48, 67), Color.FromArgb(233, 237, 245), false);
+            btnSelectAll.Location = new Point(14, 196);
+            btnSelectAll.Size = new Size(108, 26);
             btnSelectAll.Click += (s, e) => { for (int i = 0; i < chkListMods.Items.Count; i++) chkListMods.SetItemChecked(i, true); };
 
-            btnDeselectAll = new Button();
-            btnDeselectAll.Text = "Зняти всі";
-            btnDeselectAll.Location = new Point(135, 182);
-            btnDeselectAll.Size = new Size(110, 28);
+            btnDeselectAll = MakeButton("Зняти всі", Color.FromArgb(39, 48, 67), Color.FromArgb(233, 237, 245), false);
+            btnDeselectAll.Location = new Point(130, 196);
+            btnDeselectAll.Size = new Size(108, 26);
             btnDeselectAll.Click += (s, e) => { for (int i = 0; i < chkListMods.Items.Count; i++) chkListMods.SetItemChecked(i, false); };
 
+            lblRequiredNote = new Label();
+            lblRequiredNote.Location = new Point(252, 194);
+            lblRequiredNote.Size = new Size(232, 34);
+            lblRequiredNote.ForeColor = Color.FromArgb(120, 132, 156);
+            lblRequiredNote.Font = new Font("Segoe UI", 8F, FontStyle.Regular, GraphicsUnit.Point);
+            lblRequiredNote.Text = "Системні API (ModsSettings, ModsList, OpenWG) встановлюються завжди";
+
             Panel pnlModInfo = new Panel();
-            pnlModInfo.Location = new Point(485, 25);
-            pnlModInfo.Size = new Size(315, 185);
-            pnlModInfo.BackColor = Color.FromArgb(255, 255, 255);
+            pnlModInfo.Location = new Point(496, 32);
+            pnlModInfo.Size = new Size(314, 190);
+            pnlModInfo.BackColor = Color.FromArgb(244, 246, 250);
             pnlModInfo.BorderStyle = BorderStyle.FixedSingle;
 
             lblModDetailsTitle = new Label();
             lblModDetailsTitle.Location = new Point(10, 10);
-            lblModDetailsTitle.Size = new Size(295, 22);
+            lblModDetailsTitle.Size = new Size(292, 22);
             lblModDetailsTitle.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold, GraphicsUnit.Point);
+            lblModDetailsTitle.ForeColor = Color.FromArgb(30, 36, 48);
             lblModDetailsTitle.Text = "Оберіть мод зі списку";
 
             lblModDetailsMeta = new Label();
             lblModDetailsMeta.Location = new Point(10, 34);
-            lblModDetailsMeta.Size = new Size(295, 20);
+            lblModDetailsMeta.Size = new Size(292, 20);
             lblModDetailsMeta.Font = new Font("Segoe UI", 8.5F, FontStyle.Regular, GraphicsUnit.Point);
-            lblModDetailsMeta.ForeColor = Color.FromArgb(100, 110, 125);
+            lblModDetailsMeta.ForeColor = Color.FromArgb(106, 118, 136);
             lblModDetailsMeta.Text = "";
 
             txtModDescription = new TextBox();
             txtModDescription.Location = new Point(10, 58);
-            txtModDescription.Size = new Size(295, 115);
+            txtModDescription.Size = new Size(294, 122);
             txtModDescription.Multiline = true;
             txtModDescription.ReadOnly = true;
             txtModDescription.BorderStyle = BorderStyle.None;
-            txtModDescription.BackColor = Color.FromArgb(255, 255, 255);
+            txtModDescription.BackColor = Color.FromArgb(244, 246, 250);
+            txtModDescription.ForeColor = Color.FromArgb(42, 51, 72);
             txtModDescription.Font = new Font("Segoe UI", 8.8F, FontStyle.Regular, GraphicsUnit.Point);
 
             pnlModInfo.Controls.Add(lblModDetailsTitle);
             pnlModInfo.Controls.Add(lblModDetailsMeta);
             pnlModInfo.Controls.Add(txtModDescription);
 
+            grpMods.Controls.Add(lblModCounter);
             grpMods.Controls.Add(chkListMods);
             grpMods.Controls.Add(btnSelectAll);
             grpMods.Controls.Add(btnDeselectAll);
+            grpMods.Controls.Add(lblRequiredNote);
             grpMods.Controls.Add(pnlModInfo);
             this.Controls.Add(grpMods);
 
-            grpOptions = new GroupBox();
-            grpOptions.Text = " Параметри встановлення ";
-            grpOptions.Location = new Point(15, 395);
-            grpOptions.Size = new Size(815, 82);
+            grpOptions = new SectionPanel("Параметри встановлення");
+            grpOptions.Location = new Point(16, 454);
+            grpOptions.Size = new Size(824, 106);
 
             chkCleanOld = new CheckBox();
-            chkCleanOld.Text = "Видаляти старі та конфліктуючі версії вибраних модів (рекомендовано)";
-            chkCleanOld.Location = new Point(15, 22);
+            chkCleanOld.Text = "Очищати старі версії модів (рекомендовано)";
+            chkCleanOld.Location = new Point(14, 34);
             chkCleanOld.AutoSize = true;
             chkCleanOld.Checked = true;
+            chkCleanOld.ForeColor = Color.FromArgb(233, 237, 245);
 
             chkBackup = new CheckBox();
-            chkBackup.Text = "Створювати резервну копію перед заміною (.backups)";
-            chkBackup.Location = new Point(485, 22);
+            chkBackup.Text = "Бекап перед заміною (.backups)";
+            chkBackup.Location = new Point(436, 34);
             chkBackup.AutoSize = true;
             chkBackup.Checked = true;
+            chkBackup.ForeColor = Color.FromArgb(233, 237, 245);
 
             chkInstallLauncher = new CheckBox();
-            chkInstallLauncher.Text = "Встановити лаунчер автооновлення модів (ярлик на робочому столі)";
-            chkInstallLauncher.Location = new Point(15, 50);
+            chkInstallLauncher.Text = "Встановити лаунчер автооновлення";
+            chkInstallLauncher.Location = new Point(14, 68);
             chkInstallLauncher.AutoSize = true;
             chkInstallLauncher.Checked = true;
+            chkInstallLauncher.ForeColor = Color.FromArgb(233, 237, 245);
             chkInstallLauncher.CheckedChanged += (s, e) => { chkHijackShortcuts.Enabled = chkInstallLauncher.Checked; };
 
             chkHijackShortcuts = new CheckBox();
             chkHijackShortcuts.Text = "Вбудувати у стандартні ярлики гри";
-            chkHijackShortcuts.Location = new Point(485, 50);
+            chkHijackShortcuts.Location = new Point(436, 68);
             chkHijackShortcuts.AutoSize = true;
             chkHijackShortcuts.Checked = true;
+            chkHijackShortcuts.ForeColor = Color.FromArgb(233, 237, 245);
 
             grpOptions.Controls.Add(chkCleanOld);
             grpOptions.Controls.Add(chkBackup);
@@ -267,74 +298,142 @@ namespace WotModpackInstaller
             this.Controls.Add(grpOptions);
 
             lblStatus = new Label();
-            lblStatus.Location = new Point(15, 482);
-            lblStatus.Size = new Size(815, 20);
+            lblStatus.Location = new Point(16, 570);
+            lblStatus.Size = new Size(824, 18);
+            lblStatus.ForeColor = Color.FromArgb(150, 162, 186);
             lblStatus.Text = "Готово до встановлення";
 
             prgInstall = new ProgressBar();
-            prgInstall.Location = new Point(15, 505);
-            prgInstall.Size = new Size(815, 20);
+            prgInstall.Location = new Point(16, 592);
+            prgInstall.Size = new Size(824, 18);
+
+            SectionPanel grpLog = new SectionPanel(null);
+            grpLog.Location = new Point(16, 618);
+            grpLog.Size = new Size(824, 66);
 
             txtLog = new TextBox();
-            txtLog.Location = new Point(15, 532);
-            txtLog.Size = new Size(815, 88);
+            txtLog.Location = new Point(10, 8);
+            txtLog.Size = new Size(804, 50);
             txtLog.Multiline = true;
             txtLog.ReadOnly = true;
             txtLog.ScrollBars = ScrollBars.Vertical;
             txtLog.Font = new Font("Consolas", 8.5F, FontStyle.Regular, GraphicsUnit.Point);
-            txtLog.BackColor = Color.FromArgb(240, 243, 246);
+            txtLog.BackColor = Color.FromArgb(15, 19, 29);
+            txtLog.ForeColor = Color.FromArgb(143, 162, 191);
+            txtLog.BorderStyle = BorderStyle.None;
+            grpLog.Controls.Add(txtLog);
+            this.Controls.Add(grpLog);
             this.Controls.Add(lblStatus);
             this.Controls.Add(prgInstall);
-            this.Controls.Add(txtLog);
 
-            btnInstall = new Button();
-            btnInstall.Text = " Встановити вибрані моди ";
-            btnInstall.Location = new Point(15, 630);
-            btnInstall.Size = new Size(215, 38);
-            btnInstall.Font = new Font("Segoe UI", 10F, FontStyle.Bold, GraphicsUnit.Point);
-            btnInstall.BackColor = Color.FromArgb(34, 139, 34);
-            btnInstall.ForeColor = Color.White;
-            btnInstall.FlatStyle = FlatStyle.Flat;
+            btnInstall = MakeButton("Встановити вибрані моди", Color.FromArgb(47, 125, 58), Color.White, true);
+            btnInstall.Location = new Point(16, 694);
+            btnInstall.Size = new Size(210, 40);
             btnInstall.Click += BtnInstall_Click;
 
-            btnLaunchGame = new Button();
-            btnLaunchGame.Text = " Запустити World of Tanks ";
-            btnLaunchGame.Location = new Point(240, 630);
-            btnLaunchGame.Size = new Size(195, 38);
-            btnLaunchGame.Font = new Font("Segoe UI", 9.5F, FontStyle.Regular, GraphicsUnit.Point);
+            btnLaunchGame = MakeButton("Запустити World of Tanks", Color.FromArgb(39, 48, 67), Color.FromArgb(233, 237, 245), false);
+            btnLaunchGame.Location = new Point(236, 694);
+            btnLaunchGame.Size = new Size(200, 40);
             btnLaunchGame.Enabled = false;
             btnLaunchGame.Click += BtnLaunchGame_Click;
 
-            btnRollback = new Button();
-            btnRollback.Text = "Відкат до бекапу";
-            btnRollback.Location = new Point(445, 630);
-            btnRollback.Size = new Size(140, 38);
-            btnRollback.Font = new Font("Segoe UI", 9.5F, FontStyle.Regular, GraphicsUnit.Point);
+            btnRollback = MakeButton("Відкат до бекапу", Color.FromArgb(39, 48, 67), Color.FromArgb(233, 237, 245), false);
+            btnRollback.Location = new Point(446, 694);
+            btnRollback.Size = new Size(130, 40);
             btnRollback.Click += BtnRollback_Click;
-            this.Controls.Add(btnRollback);
 
-            btnUninstall = new Button();
-            btnUninstall.Text = "Видалити...";
-            btnUninstall.Location = new Point(595, 630);
-            btnUninstall.Size = new Size(125, 38);
-            btnUninstall.Font = new Font("Segoe UI", 9.5F, FontStyle.Regular, GraphicsUnit.Point);
-            btnUninstall.ForeColor = Color.FromArgb(165, 40, 40);
+            btnUninstall = MakeButton("Видалити...", Color.FromArgb(39, 48, 67), Color.FromArgb(224, 108, 108), false);
+            btnUninstall.Location = new Point(586, 694);
+            btnUninstall.Size = new Size(130, 40);
             btnUninstall.Click += BtnUninstall_Click;
-            this.Controls.Add(btnUninstall);
 
-            btnExit = new Button();
-            btnExit.Text = "Вихід";
-            btnExit.Location = new Point(730, 630);
-            btnExit.Size = new Size(100, 38);
-            btnExit.Font = new Font("Segoe UI", 9.5F, FontStyle.Regular, GraphicsUnit.Point);
+            btnExit = MakeButton("Вихід", Color.FromArgb(39, 48, 67), Color.FromArgb(150, 162, 186), false);
+            btnExit.Location = new Point(726, 694);
+            btnExit.Size = new Size(114, 40);
             btnExit.Click += (s, e) => this.Close();
 
             this.Controls.Add(btnInstall);
             this.Controls.Add(btnLaunchGame);
+            this.Controls.Add(btnRollback);
+            this.Controls.Add(btnUninstall);
             this.Controls.Add(btnExit);
         }
 
-        private void LocateModsFolder()
+        internal static Button MakeButton(string text, Color back, Color fore, bool bold)
+        {
+            Button b = new Button();
+            b.Text = text;
+            b.BackColor = back;
+            b.ForeColor = fore;
+            b.FlatStyle = FlatStyle.Flat;
+            b.FlatAppearance.BorderColor = Color.FromArgb(57, 68, 95);
+            b.FlatAppearance.MouseOverBackColor = ControlPaint.Light(back, 0.12F);
+            b.FlatAppearance.MouseDownBackColor = ControlPaint.Dark(back, 0.05F);
+            b.Cursor = Cursors.Hand;
+            if (bold) b.Font = new Font("Segoe UI", 10F, FontStyle.Bold, GraphicsUnit.Point);
+            return b;
+        }
+
+        private void UpdateModCounter()
+        {
+            int count = 0;
+            long bytes = 0;
+            for (int i = 0; i < chkListMods.Items.Count; i++)
+            {
+                if (chkListMods.GetItemChecked(i))
+                {
+                    count++;
+                    bytes += ((ModItem)chkListMods.Items[i]).size_bytes;
+                }
+            }
+            lblModCounter.Text = string.Format("Вибрано: {0} з {1}  •  {2:0.0} МБ", count, chkListMods.Items.Count, bytes / (1024.0 * 1024.0));
+        }
+
+        private class SectionPanel : Panel
+        {
+            public string Title;
+
+            public SectionPanel(string title)
+            {
+                Title = title;
+                BackColor = Color.FromArgb(27, 34, 51);
+                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                Graphics g = e.Graphics;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                Rectangle rect = new Rectangle(1, 1, Width - 3, Height - 3);
+                using (GraphicsPath path = new GraphicsPath())
+                {
+                    int d = 16;
+                    path.AddArc(rect.X, rect.Y, d, d, 180, 90);
+                    path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90);
+                    path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
+                    path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
+                    path.CloseFigure();
+                    using (var br = new SolidBrush(BackColor)) g.FillPath(br, path);
+                    using (var pen = new Pen(Color.FromArgb(45, 56, 84), 1.4f)) g.DrawPath(pen, path);
+                }
+                if (!string.IsNullOrEmpty(Title))
+                    using (var f = new Font("Segoe UI", 8.25F, FontStyle.Bold, GraphicsUnit.Point))
+                    using (var br = new SolidBrush(Color.FromArgb(150, 162, 186)))
+                        g.DrawString(Title.ToUpper(), f, br, 14f, 8f);
+            }
+        }
+
+        internal static bool IsValidModsRoot(string dir)
+        {
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return false;
+            foreach (string sub in Directory.GetDirectories(dir))
+            {
+                if (File.Exists(Path.Combine(sub, "info.json"))) return true;
+            }
+            return false;
+        }
+
+        internal static string ResolveModsRoot()
         {
             string exeDir = "";
             try
@@ -342,7 +441,6 @@ namespace WotModpackInstaller
                 exeDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
             }
             catch { }
-
             if (string.IsNullOrEmpty(exeDir))
             {
                 exeDir = AppDomain.CurrentDomain.BaseDirectory;
@@ -356,27 +454,38 @@ namespace WotModpackInstaller
                 Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "staging_modpack", "Mods")
             };
 
-            foreach (var cand in candidates)
+            foreach (string cand in candidates)
             {
-                if (Directory.Exists(cand))
-                {
-                    modsRootPath = cand;
-                    return;
-                }
+                if (IsValidModsRoot(cand)) return cand;
             }
 
             try
             {
                 string parentCandidate = Path.Combine(Directory.GetParent(exeDir).FullName, "Mods");
-                if (Directory.Exists(parentCandidate))
-                {
-                    modsRootPath = parentCandidate;
-                    return;
-                }
+                if (IsValidModsRoot(parentCandidate)) return parentCandidate;
             }
             catch { }
 
-            modsRootPath = candidates[0];
+            string payload = ExtractEmbeddedPayload();
+            if (payload != null)
+            {
+                string payloadMods = Path.Combine(payload, "Mods");
+                if (IsValidModsRoot(payloadMods)) return payloadMods;
+            }
+            return null;
+        }
+
+        private void LocateModsFolder()
+        {
+            modsRootPath = ResolveModsRoot();
+            if (modsRootPath != null)
+            {
+                Log("[Джерело модів] " + modsRootPath);
+            }
+            else
+            {
+                modsRootPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Mods");
+            }
         }
 
         private void LoadModsList()
@@ -423,6 +532,7 @@ namespace WotModpackInstaller
             {
                 chkListMods.SelectedIndex = 0;
             }
+            UpdateModCounter();
 
             var req = loadedMods.FindAll(m => m.required).ConvertAll(m => m.title);
             Log(string.Format("Модів на вибір: {0}", loadedMods.Count - req.Count));
@@ -736,13 +846,13 @@ namespace WotModpackInstaller
             if (IsValidWotDir(cleaned))
             {
                 detectedGameVersion = DetectGameVersion(cleaned);
-                lblGameStatus.ForeColor = Color.ForestGreen;
+                lblGameStatus.ForeColor = Color.FromArgb(111, 207, 139);
                 lblGameStatus.Text = string.Format("✔ Клієнт World of Tanks знайдено! Версія гри: {0}", detectedGameVersion);
                 btnInstall.Enabled = true;
             }
             else
             {
-                lblGameStatus.ForeColor = Color.Crimson;
+                lblGameStatus.ForeColor = Color.FromArgb(224, 122, 122);
                 lblGameStatus.Text = "⚠ Папку гри не розпізнано. Вкажіть правильний шлях через кнопку 'Огляд...'";
                 btnInstall.Enabled = false;
             }
@@ -1201,12 +1311,15 @@ namespace WotModpackInstaller
         private string LocateStagedLauncherExe()
         {
             string exeDir = AppDomain.CurrentDomain.BaseDirectory;
-            string[] candidates = new string[]
+            var candidates = new List<string>
             {
                 Path.Combine(exeDir, "Launcher", "WotModLauncher.exe"),
                 Path.Combine(exeDir, "staging_modpack", "Launcher", "WotModLauncher.exe"),
                 Path.Combine(exeDir, "WoT modpack by Niedvin", "Launcher", "WotModLauncher.exe")
             };
+            string payload = ExtractEmbeddedPayload();
+            if (payload != null)
+                candidates.Add(Path.Combine(payload, "Launcher", "WotModLauncher.exe"));
             foreach (string c in candidates)
                 if (File.Exists(c)) return c;
             return null;
@@ -1625,12 +1738,77 @@ namespace WotModpackInstaller
         }
 
         [STAThread]
-        public static void Main()
+        public static void Main(string[] args)
         {
             ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+            if (args != null && args.Length > 0 && Array.IndexOf(args, "--selftest") >= 0)
+            {
+                Environment.Exit(RunSelfTest());
+                return;
+            }
             Application.Run(new MainForm());
+        }
+
+        private static int RunSelfTest()
+        {
+            string report = Path.Combine(Path.GetTempPath(), "wot_setup_selftest.txt");
+            try
+            {
+                string dir = ExtractEmbeddedPayload();
+                if (dir == null)
+                {
+                    File.WriteAllText(report, "FAIL: embedded payload resource not found");
+                    return 1;
+                }
+                string[] modDirs = Directory.GetDirectories(Path.Combine(dir, "Mods"));
+                bool launcher = File.Exists(Path.Combine(dir, "Launcher", "WotModLauncher.exe"));
+                string resolved = ResolveModsRoot();
+                bool resolvedValid = resolved != null && IsValidModsRoot(resolved);
+                File.WriteAllText(report, string.Format(
+                    "OK payload_mods={0} launcher={1} resolved={2} resolved_valid={3}",
+                    modDirs.Length, launcher, resolved ?? "null", resolvedValid));
+                return (modDirs.Length > 0 && launcher && resolvedValid) ? 0 : 2;
+            }
+            catch (Exception ex)
+            {
+                File.WriteAllText(report, "FAIL: " + ex.Message);
+                return 3;
+            }
+        }
+
+        internal static string ExtractEmbeddedPayload()
+        {
+            if (payloadDir != null) return payloadDir;
+            try
+            {
+                string resName = null;
+                foreach (string n in Assembly.GetExecutingAssembly().GetManifestResourceNames())
+                    if (n.EndsWith("payload.zip", StringComparison.OrdinalIgnoreCase)) { resName = n; break; }
+                if (resName == null) return null;
+
+                string dir = Path.Combine(GetLauncherInstallDir(), "payload");
+                if (Directory.Exists(dir)) Directory.Delete(dir, true);
+                Directory.CreateDirectory(dir);
+
+                using (Stream s = Assembly.GetExecutingAssembly().GetManifestResourceStream(resName))
+                using (ZipArchive zip = new ZipArchive(s, ZipArchiveMode.Read))
+                {
+                    foreach (ZipArchiveEntry entry in zip.Entries)
+                    {
+                        if (entry.FullName.Contains("..")) continue;
+                        string dest = Path.Combine(dir, entry.FullName);
+                        Directory.CreateDirectory(Path.GetDirectoryName(dest));
+                        using (Stream es = entry.Open())
+                        using (FileStream fs = File.Create(dest))
+                            es.CopyTo(fs);
+                    }
+                }
+                payloadDir = dir;
+                return dir;
+            }
+            catch { return null; }
         }
     }
 
@@ -1704,22 +1882,24 @@ namespace WotModpackInstaller
         private void InitializeComponent()
         {
             this.Text = "Видалення компонентів модпаку";
-            this.Size = new Size(660, 440);
+            this.ClientSize = new Size(660, 420);
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
             this.Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
-            this.BackColor = Color.FromArgb(246, 248, 250);
+            this.BackColor = Color.FromArgb(20, 25, 38);
 
             Label lblHint = new Label();
             lblHint.Text = "Позначте компоненти, які потрібно видалити:";
             lblHint.Location = new Point(15, 12);
             lblHint.AutoSize = true;
+            lblHint.ForeColor = Color.FromArgb(233, 237, 245);
 
             chkList = new CheckedListBox();
             chkList.Location = new Point(15, 38);
-            chkList.Size = new Size(615, 300);
+            chkList.Size = new Size(630, 310);
             chkList.CheckOnClick = true;
+            chkList.BorderStyle = BorderStyle.FixedSingle;
 
             for (int i = 0; i < items.Count; i++)
             {
@@ -1727,30 +1907,24 @@ namespace WotModpackInstaller
                 chkList.SetItemChecked(idx, !items[i].IsConfigs);
             }
 
-            Button btnSelectAll = new Button();
-            btnSelectAll.Text = "Вибрати все";
-            btnSelectAll.Location = new Point(15, 350);
-            btnSelectAll.Size = new Size(130, 32);
+            Button btnSelectAll = MainForm.MakeButton("Вибрати все", Color.FromArgb(39, 48, 67), Color.FromArgb(233, 237, 245), false);
+            btnSelectAll.Location = new Point(15, 360);
+            btnSelectAll.Size = new Size(120, 32);
             btnSelectAll.Click += (s, e) => { for (int i = 0; i < chkList.Items.Count; i++) chkList.SetItemChecked(i, true); };
 
-            Button btnDeselectAll = new Button();
-            btnDeselectAll.Text = "Зняти все";
-            btnDeselectAll.Location = new Point(155, 350);
-            btnDeselectAll.Size = new Size(130, 32);
+            Button btnDeselectAll = MainForm.MakeButton("Зняти все", Color.FromArgb(39, 48, 67), Color.FromArgb(233, 237, 245), false);
+            btnDeselectAll.Location = new Point(145, 360);
+            btnDeselectAll.Size = new Size(120, 32);
             btnDeselectAll.Click += (s, e) => { for (int i = 0; i < chkList.Items.Count; i++) chkList.SetItemChecked(i, false); };
 
-            Button btnDelete = new Button();
-            btnDelete.Text = "Видалити вибране";
-            btnDelete.Location = new Point(360, 350);
+            Button btnDelete = MainForm.MakeButton("Видалити вибране", Color.FromArgb(120, 45, 45), Color.White, true);
+            btnDelete.Location = new Point(360, 360);
             btnDelete.Size = new Size(150, 32);
-            btnDelete.Font = new Font("Segoe UI", 9F, FontStyle.Bold, GraphicsUnit.Point);
-            btnDelete.ForeColor = Color.FromArgb(165, 40, 40);
             btnDelete.Click += BtnDelete_Click;
 
-            Button btnCancel = new Button();
-            btnCancel.Text = "Скасувати";
-            btnCancel.Location = new Point(525, 350);
-            btnCancel.Size = new Size(105, 32);
+            Button btnCancel = MainForm.MakeButton("Скасувати", Color.FromArgb(39, 48, 67), Color.FromArgb(150, 162, 186), false);
+            btnCancel.Location = new Point(525, 360);
+            btnCancel.Size = new Size(120, 32);
             btnCancel.Click += (s, e) => Close();
 
             this.Controls.Add(lblHint);
@@ -1827,7 +2001,7 @@ namespace WotModpackInstaller
             string[] configDirs = new string[]
             {
                 "server_online", "platoon_autostart", "armor_flashlight",
-                "spectator_teammate_hud", "background_fps_limiter"
+                "spectator_teammate_hud", "background_fps_limiter", "research_button"
             };
             foreach (string sub in configDirs)
             {
