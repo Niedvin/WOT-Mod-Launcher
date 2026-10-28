@@ -46,7 +46,7 @@ mods_def = [
         'folder': '01_Server_Online_Autoconnect',
         'id': 'server_online',
         'title': 'Server Online & Autoconnect',
-        'version': '1.1.2',
+        'version': '1.1.1',
         'author': 'Niedvin',
         'description': 'Автоматичний вибір сервера з максимальним онлайном, розширене меню вибору сервера з числовим онлайном без обрізання та авто-релоґін після бою при дисбалансі онлайну (>=1.5x).',
         'changes': 'Покращений вибір сервера за онлайнном та стабільний авто-релоґін після бою.',
@@ -179,10 +179,10 @@ mods_def = [
         'folder': '07_Spectator_Teammate_HUD',
         'id': 'spectator_teammate_hud',
         'title': 'Spectator Teammate HUD',
-        'version': '1.0.6',
+        'version': '1.0.7',
         'author': 'Niedvin',
         'description': 'Відображає приціл у реальному часі, таймер перезарядки, стан модулів і екіпажу, а також таймери перезарядки спорядження союзника, за яким ви спостерігаєте після знищення вашого танка.',
-        'changes': 'Приціл у реальному часі за серверними даними союзника, плавне оновлення до 60 FPS.',
+        'changes': 'Consumables anchored beside the tank damage panel using stable button bounds.',
         'default_checked': True,
         'clean_patterns': ['ua.spectator_teammate_hud*.wotmod'],
         'clean_res_mods': [],
@@ -194,7 +194,7 @@ mods_def = [
             'Повна відсутність фонового навантаження на FPS під час живого бою.'
         ],
         'files': [
-            (get_src_wotmod('ua.spectator_teammate_hud_1.0.6.wotmod'), 'game_files/mods/_VERSION_/ua.spectator_teammate_hud_1.0.6.wotmod'),
+            (get_src_wotmod('ua.spectator_teammate_hud_1.0.7.wotmod'), 'game_files/mods/_VERSION_/ua.spectator_teammate_hud_1.0.7.wotmod'),
             ('mods/configs/spectator_teammate_hud/config.json', 'game_files/mods/configs/spectator_teammate_hud/config.json')
         ]
     },

@@ -1,6 +1,7 @@
 import os
 import shutil
 import subprocess
+import sys
 import zipfile
 
 csc_path = r'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
@@ -55,9 +56,10 @@ subprocess.check_call([
 ])
 cert_cmd = 'Set-AuthenticodeSignature -FilePath ' + setup_exe + ' -Certificate (Get-Item Cert:\\CurrentUser\\My\\' + cert_thumb + ')'
 subprocess.check_call([os.path.join(os.environ['SystemRoot'], 'System32/WindowsPowerShell/v1.0/powershell.exe'), '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', "$ErrorActionPreference = 'Stop'; Import-Module Microsoft.PowerShell.Security -ErrorAction Stop; " + cert_cmd], env=sign_environment)
-subprocess.check_call([os.path.abspath(setup_exe), '--selftest'])
-selftest_report = os.path.join(os.environ.get('TEMP', '.'), 'wot_setup_selftest.txt')
-print('Selftest:', open(selftest_report, encoding='utf-8').read().strip())
+if '--skip-selftest' not in sys.argv:
+    subprocess.check_call([os.path.abspath(setup_exe), '--selftest'])
+    selftest_report = os.path.join(os.environ.get('TEMP', '.'), 'wot_setup_selftest.txt')
+    print('Selftest:', open(selftest_report, encoding='utf-8').read().strip())
 print(f'Built single-file {setup_exe} ({os.path.getsize(setup_exe) / (1024*1024):.2f} MB).')
 
 def make_modpack_zip(target_zip):
@@ -76,14 +78,14 @@ root_zip = 'WoT_Modpack_by_Niedvin.zip'
 make_modpack_zip(root_zip)
 print(f'Repacked {root_zip} ({os.path.getsize(root_zip) / (1024*1024):.2f} MB).')
 
-desktop = os.path.expanduser('~\\Desktop')
-desktop_zip = os.path.join(desktop, 'WoT modpack by Niedvin.zip')
-make_modpack_zip(desktop_zip)
-print(f'Repacked {desktop_zip} ({os.path.getsize(desktop_zip) / (1024*1024):.2f} MB).')
-
-desktop_dir = os.path.join(desktop, 'WoT modpack by Niedvin')
-if os.path.exists(desktop_dir):
-    shutil.rmtree(desktop_dir)
-shutil.copytree('staging_modpack', desktop_dir)
-print('Updated extracted folder on Desktop successfully.')
+if '--workspace-only' not in sys.argv:
+    desktop = os.path.expanduser('~\\Desktop')
+    desktop_zip = os.path.join(desktop, 'WoT modpack by Niedvin.zip')
+    make_modpack_zip(desktop_zip)
+    print(f'Repacked {desktop_zip} ({os.path.getsize(desktop_zip) / (1024*1024):.2f} MB).')
+    desktop_dir = os.path.join(desktop, 'WoT modpack by Niedvin')
+    if os.path.exists(desktop_dir):
+        shutil.rmtree(desktop_dir)
+    shutil.copytree('staging_modpack', desktop_dir)
+    print('Updated extracted folder on Desktop successfully.')
 print('INSTALLER BUILD FINISHED: staging, signed exes, setup payload and archives are ready.')

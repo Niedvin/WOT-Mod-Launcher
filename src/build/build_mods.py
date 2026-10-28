@@ -136,8 +136,8 @@ create_or_update_wotmod(src_fps, dst_fps, {
 
 subprocess.check_call(['python', 'scratch/background_fps/build.py'])
 subprocess.check_call(['python', 'scratch/research_btn/build.py', '--install'])
-subprocess.check_call(['python', 'scratch/spectator_hud/build.py'])
-dst_hud = f'{build_dir}/ua.spectator_teammate_hud_1.0.6.wotmod'
+subprocess.check_call(['python', 'scratch/spectator_hud/build.py', '--no-staging'])
+dst_hud = f'{build_dir}/ua.spectator_teammate_hud_1.0.7.wotmod'
 
 for mod_file in [dst_srv, dst_plt, dst_arm, dst_fps, dst_hud]:
     live_target = os.path.join(f'mods/{ver}', os.path.basename(mod_file))
@@ -157,6 +157,7 @@ old_mods = [
     'ua.spectator_teammate_hud_1.0.3.wotmod',
     'ua.spectator_teammate_hud_1.0.4.wotmod',
     'ua.spectator_teammate_hud_1.0.5.wotmod',
+    'ua.spectator_teammate_hud_1.0.6.wotmod',
     'ua.background_fps_limiter_1.0.1.wotmod',
     'ua.background_fps_limiter_1.0.2.wotmod'
 ]

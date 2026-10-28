@@ -15,7 +15,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / 'scratch/spectator_hud'
 PY27 = ROOT / 'py27_dist/python.exe'
-VERSION = '1.0.6'
+VERSION = '1.0.7'
 MOD_NAME = 'ua.spectator_teammate_hud_%s.wotmod' % VERSION
 ENTRY = 'res/scripts/client/gui/mods/mod_spectator_teammate_hud.pyc'
 STAGING = ROOT / 'staging_modpack/Mods/07_Spectator_Teammate_HUD'
@@ -59,15 +59,16 @@ def build():
         assert all(info.compress_type == zipfile.ZIP_STORED for info in archive.infolist())
     target = SOURCE / MOD_NAME
     os.replace(temporary, target)
-    destinations = [ROOT / 'build/mods' / get_game_version() / MOD_NAME, STAGING / 'game_files/mods/_VERSION_' / MOD_NAME]
+    destinations = [ROOT / 'build/mods' / get_game_version() / MOD_NAME]
+    directories = [('build', destinations[0].parent)]
+    if '--no-staging' not in sys.argv:
+        destinations.append(STAGING / 'game_files/mods/_VERSION_' / MOD_NAME)
+        directories.append(('staging', destinations[-1].parent))
     for path in destinations:
         path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(target, path)
-    info_path = STAGING / 'info.json'
-    info = json.loads(info_path.read_text(encoding='utf-8-sig'))
-    info['version'] = VERSION
     backup = ROOT / '.backups' / ('spectator-build-' + datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
-    for label, directory in [('build', destinations[0].parent), ('staging', destinations[1].parent)]:
+    for label, directory in directories:
         for old in directory.glob('ua.spectator_teammate_hud_*.wotmod'):
             if old.name != MOD_NAME:
                 saved = backup / label / old.name
@@ -75,8 +76,12 @@ def build():
                 shutil.copy2(old, saved)
                 assert saved.read_bytes() == old.read_bytes()
                 old.unlink()
-    info['size_bytes'] = sum(path.stat().st_size for path in (STAGING / 'game_files').rglob('*') if path.is_file())
-    info_path.write_text(json.dumps(info, ensure_ascii=False, indent=4) + '\n', encoding='utf-8')
+    if '--no-staging' not in sys.argv:
+        info_path = STAGING / 'info.json'
+        info = json.loads(info_path.read_text(encoding='utf-8-sig'))
+        info['version'] = VERSION
+        info['size_bytes'] = sum(path.stat().st_size for path in (STAGING / 'game_files').rglob('*') if path.is_file())
+        info_path.write_text(json.dumps(info, ensure_ascii=False, indent=4) + '\n', encoding='utf-8')
     print('PACKAGE', target)
     print('SHA256', hashlib.sha256(target.read_bytes()).hexdigest())
 

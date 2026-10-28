@@ -46,14 +46,18 @@ class SpectatorHudAdapter(object):
         for index in range(15):
             renderer = clip.getRendererBySlotIdx(index)
             if renderer is not None and renderer.visible:
-                bounds = renderer.getBounds(clip.parent)
+                anchor = getattr(renderer, 'hit', None) or getattr(renderer, 'iconLoader', None)
+                if anchor is None:
+                    continue
+                # Hidden glow clips inflate renderer bounds beyond visible buttons. — 2026-10-28
+                bounds = anchor.getBounds(clip)
                 if float(bounds.width) > 0 and float(bounds.height) > 0:
                     rectangles.append(bounds)
         if not rectangles:
             return
         native_size = self._native_stage_size(clip, damage)
-        left = min(float(bounds.x) for bounds in rectangles) - float(clip.x)
-        bottom = max(float(bounds.y) + float(bounds.height) for bounds in rectangles) - float(clip.y)
+        left = min(float(bounds.x) for bounds in rectangles)
+        bottom = max(float(bounds.y) + float(bounds.height) for bounds in rectangles)
         # DamagePanel reserves 230 px independently of animated child bounds in WoT 2.4.1.0 — 2026-10-27
         target_x = float(damage.x) + 230.0 + 12.0 - left
         target_y = native_size[1] - 4.0 - bottom
