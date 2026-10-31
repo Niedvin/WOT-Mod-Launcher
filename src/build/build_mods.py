@@ -67,14 +67,14 @@ def find_src_or_base(primary_name, fallback_name):
             return p
     return f'mods/{ver}/{fallback_name}'
 
-src_srv = find_src_or_base('ua.server_online_autoconnect_1.1.1.wotmod', 'ua.server_online_autoconnect_1.1.0.wotmod')
-dst_srv = f'{build_dir}/ua.server_online_autoconnect_1.1.1.wotmod'
+src_srv = find_src_or_base('ua.server_online_autoconnect_1.1.2.wotmod', 'ua.server_online_autoconnect_1.1.1.wotmod')
+dst_srv = f'{build_dir}/ua.server_online_autoconnect_1.1.2.wotmod'
 with open('mods/configs/server_online/mod_server_online_autoconnect.pyc', 'rb') as f:
     srv_pyc = f.read()
 srv_meta = """<root>
     <id>ua.server_online_autoconnect</id>
-    <version>1.1.1</version>
-    <name>Server Online &amp; AutoConnect</name>
+    <version>1.1.2</version>
+    <name>Smart Server</name>
     <description>Automatically connects to highest population server, expands dropdown width, formats server names, and auto-reconnects post-battle when population is 1.5x higher.</description>
 </root>"""
 create_or_update_wotmod(src_srv, dst_srv, {
@@ -82,14 +82,14 @@ create_or_update_wotmod(src_srv, dst_srv, {
     'res/scripts/client/gui/mods/mod_server_online_autoconnect.pyc': srv_pyc
 })
 
-src_plt = find_src_or_base('ua.platoon_autostart_1.0.1.wotmod', 'ua.platoon_autostart_1.0.0.wotmod')
-dst_plt = f'{build_dir}/ua.platoon_autostart_1.0.1.wotmod'
+src_plt = find_src_or_base('ua.platoon_autostart_1.0.3.wotmod', 'ua.platoon_autostart_1.0.2.wotmod')
+dst_plt = f'{build_dir}/ua.platoon_autostart_1.0.3.wotmod'
 with open('mods/configs/platoon_autostart/mod_platoon_autostart.pyc', 'rb') as f:
     plt_pyc = f.read()
 plt_meta = """<root>
     <id>ua.platoon_autostart</id>
-    <version>1.0.1</version>
-    <name>Platoon Auto-Start &amp; Battle Button Mod</name>
+    <version>1.0.3</version>
+    <name>Squad+</name>
     <description>Auto-starts battle when platoon is ready, duplicates Battle button in platoon window, and fixes ready cooldown delay.</description>
 </root>"""
 plt_map = {
@@ -104,14 +104,14 @@ if os.path.exists('scratch/platoon_ui_edit/MembersWindow.css'):
         plt_map['res/gui/gameface/_dist/production/lobby/platoon/MembersWindow/MembersWindow.css'] = f.read()
 create_or_update_wotmod(src_plt, dst_plt, plt_map)
 
-src_arm = find_src_or_base('ua.armor_flashlight_brightness_1.0.1.wotmod', 'ua.armor_flashlight_brightness_1.0.0.wotmod')
-dst_arm = f'{build_dir}/ua.armor_flashlight_brightness_1.0.1.wotmod'
+src_arm = find_src_or_base('ua.armor_flashlight_brightness_1.0.2.wotmod', 'ua.armor_flashlight_brightness_1.0.1.wotmod')
+dst_arm = f'{build_dir}/ua.armor_flashlight_brightness_1.0.2.wotmod'
 with open('mods/configs/armor_flashlight/mod_armor_flashlight_brightness.pyc', 'rb') as f:
     arm_pyc = f.read()
 arm_meta = """<root>
     <id>ua.armor_flashlight_brightness</id>
-    <version>1.0.1</version>
-    <name>Armor Flashlight Brightness</name>
+    <version>1.0.2</version>
+    <name>Velet Penetration</name>
     <description>Boosts penetration indicator brightness localized on aimed armor.</description>
 </root>"""
 create_or_update_wotmod(src_arm, dst_arm, {
@@ -119,13 +119,13 @@ create_or_update_wotmod(src_arm, dst_arm, {
     'res/scripts/client/gui/mods/mod_armor_flashlight_brightness.pyc': arm_pyc
 })
 
-src_fps = find_src_or_base('ua.background_fps_limiter_1.0.3.wotmod', 'ua.background_fps_limiter_1.0.0.wotmod')
-dst_fps = f'{build_dir}/ua.background_fps_limiter_1.0.3.wotmod'
+src_fps = find_src_or_base('ua.background_fps_limiter_1.0.4.wotmod', 'ua.background_fps_limiter_1.0.3.wotmod')
+dst_fps = f'{build_dir}/ua.background_fps_limiter_1.0.4.wotmod'
 with open('mods/configs/background_fps_limiter/mod_background_fps_limiter.pyc', 'rb') as f:
     fps_pyc = f.read()
 fps_meta = """<root>
     <id>ua.background_fps_limiter</id>
-    <version>1.0.3</version>
+    <version>1.0.4</version>
     <name>Background FPS Limiter</name>
     <description>Limits client frame rate while the window is not focused to cut idle GPU and CPU load.</description>
 </root>"""
@@ -137,7 +137,7 @@ create_or_update_wotmod(src_fps, dst_fps, {
 subprocess.check_call(['python', 'scratch/background_fps/build.py'])
 subprocess.check_call(['python', 'scratch/research_btn/build.py', '--install'])
 subprocess.check_call(['python', 'scratch/spectator_hud/build.py', '--no-staging'])
-dst_hud = f'{build_dir}/ua.spectator_teammate_hud_1.0.7.wotmod'
+dst_hud = f'{build_dir}/ua.spectator_teammate_hud_1.0.9.wotmod'
 
 for mod_file in [dst_srv, dst_plt, dst_arm, dst_fps, dst_hud]:
     live_target = os.path.join(f'mods/{ver}', os.path.basename(mod_file))
@@ -149,6 +149,7 @@ for mod_file in [dst_srv, dst_plt, dst_arm, dst_fps, dst_hud]:
 old_mods = [
     'ua.server_online_autoconnect_1.1.0.wotmod',
     'ua.platoon_autostart_1.0.0.wotmod',
+    'ua.platoon_autostart_1.0.1.wotmod',
     'ua.armor_flashlight_brightness_1.0.0.wotmod',
     'ua.background_fps_limiter_1.0.0.wotmod',
     'ua.spectator_teammate_hud_1.0.0.wotmod',
@@ -158,8 +159,15 @@ old_mods = [
     'ua.spectator_teammate_hud_1.0.4.wotmod',
     'ua.spectator_teammate_hud_1.0.5.wotmod',
     'ua.spectator_teammate_hud_1.0.6.wotmod',
+    'ua.spectator_teammate_hud_1.0.7.wotmod',
     'ua.background_fps_limiter_1.0.1.wotmod',
-    'ua.background_fps_limiter_1.0.2.wotmod'
+    'ua.background_fps_limiter_1.0.2.wotmod',
+    'ua.background_fps_limiter_1.0.3.wotmod',
+    'ua.server_online_autoconnect_1.1.1.wotmod',
+    'ua.platoon_autostart_1.0.2.wotmod',
+    'ua.armor_flashlight_brightness_1.0.1.wotmod',
+    'ua.spectator_teammate_hud_1.0.8.wotmod',
+    'ua.research_button_1.2.3.wotmod'
 ]
 for om in old_mods:
     for base in [build_dir, f'mods/{ver}']:

@@ -401,11 +401,20 @@ class SpectatorHudAdapter(object):
         self._equipment_key = None
         self._equipment_items = {}
         self._equipment_signature = None
+        self._equipment_state = {}
         self._consumables_layout = None
+        self._consumables_position = None
+        self._consumables_stale = False
+
+    def _invalidate_consumables_position(self):
+        # Rebuild changes the row width on the next frame, so reposition only after it lands — 2026-10-31
+        self._consumables_stale = True
+        self._consumables_position = None
 
     def _restore_consumables_layout(self):
         layout = self._consumables_layout
         self._consumables_layout = None
+        self._consumables_position = None
         if layout is not None:
             panel, clip, damage, native_size = layout
             if getattr(panel, 'flashObject', None) is clip:
@@ -422,10 +431,25 @@ class SpectatorHudAdapter(object):
                 return fallback
             raise
 
+    def _position_applied(self, clip, target_x, target_y):
+        applied = self._consumables_position
+        if applied is None or applied[0] is not clip:
+            return False
+        if abs(float(applied[1]) - target_x) >= 0.5 or abs(float(applied[2]) - target_y) >= 0.5:
+            return False
+        try:
+            return abs(float(clip.x) - target_x) < 0.5 and abs(float(clip.y) - target_y) < 0.5
+        except Exception:
+            return False
+
     def shift_consumables_left(self, panel, damage_panel):
         clip = getattr(panel, 'flashObject', None)
         damage = getattr(damage_panel, 'flashObject', None)
         if clip is None or damage is None:
+            return
+        if self._consumables_stale:
+            # Row was just rebuilt; its native width lands next frame, so position it then — 2026-10-31
+            self._consumables_stale = False
             return
         layout = self._consumables_layout
         if layout is not None and layout[1] is not clip:
@@ -449,20 +473,26 @@ class SpectatorHudAdapter(object):
         # DamagePanel reserves 230 px independently of animated child bounds in WoT 2.4.1.0 — 2026-10-27
         target_x = float(damage.x) + 230.0 + 12.0 - left
         target_y = native_size[1] - 4.0 - bottom
-        # ConsumablesPanel.updatePosition recalculates x and y from stored stage size on every redraw — 2026-10-27
+        # updateStage per tick re-runs updatePosition and makes the whole row blink — 2026-10-28
+        if self._position_applied(clip, target_x, target_y):
+            self._consumables_layout = (panel, clip, damage, native_size)
+            return
         clip.updateStage(2.0 * target_x + float(clip.basePanelWidth), target_y + 58.0)
         clip.x = target_x
         clip.y = target_y
         self._consumables_layout = (panel, clip, damage, native_size)
+        self._consumables_position = (clip, target_x, target_y)
 
     def reset(self):
         self._restore_consumables_layout()
+        self._consumables_stale = False
         for item in self._equipment_items.values():
             if hasattr(item, 'clear'):
                 item.clear()
         self._damage_key = self._equipment_key = None
         self._device_states.clear()
         self._equipment_items.clear()
+        self._equipment_state.clear()
         self._equipment_signature = None
 
     def bind_damage_panel(self, panel, health, max_health=None, device_states=None, vehicle=None):
@@ -519,19 +549,21 @@ class SpectatorHudAdapter(object):
             return
         key = (id(panel), vehicle_id)
         snapshots = tracker.get_equipment_snapshot(vehicle_id, current_time)
-        signature = tuple((row[0], row[1]) for row in snapshots)
+        signature = tuple(sorted(set(row[1] for row in snapshots if row[1])))
         if key != self._equipment_key or signature != self._equipment_signature:
             for item in self._equipment_items.values():
                 if hasattr(item, 'clear'):
                     item.clear()
             self._equipment_items.clear()
+            self._equipment_state.clear()
             self._equipment_key = key
             self._equipment_signature = signature
             if hasattr(panel, '_resetEquipments'):
                 panel._resetEquipments()
             else:
                 panel._reset()
-        if not snapshots:
+            self._invalidate_consumables_position()
+        if not signature:
             return
         import constants
         from items import vehicles
@@ -541,14 +573,19 @@ class SpectatorHudAdapter(object):
             from gui.battle_control.controllers.consumables.equipment_ctrl import EquipmentsController as item_factory
         active_stage = getattr(getattr(constants, 'EQUIPMENT_STAGES', None), 'ACTIVE', None)
         empty_slots = 0
+        touched = False
         for index, item_cd, quantity, stage, remaining, total in snapshots:
-            item_key = (index, item_cd)
             if not item_cd:
                 empty_slots += 1
                 if panel._cds.count(0) < empty_slots:
                     panel._onEquipmentAdded(0, None)
+                    touched = True
                 continue
-            item = self._equipment_items.get(item_key)
+            remaining = max(0.0, remaining)
+            state = (quantity, stage, int(remaining), int(total))
+            item = self._equipment_items.get(item_cd)
+            previous = self._equipment_state.get(item_cd)
+            created = False
             if item is None:
                 descriptor = vehicles.getItemByCompactDescr(item_cd)
                 if descriptor is None:
@@ -556,26 +593,37 @@ class SpectatorHudAdapter(object):
                 item = item_factory.createItem(descriptor, quantity, stage, remaining, total)
                 if item is None:
                     continue
-                self._equipment_items[item_key] = item
-            else:
+                self._equipment_items[item_cd] = item
+                created = True
+            if created or item_cd not in panel._cds:
                 item.update(quantity, stage, remaining, total)
-            if item_cd not in panel._cds:
+                self._equipment_state[item_cd] = state
                 panel._onEquipmentAdded(item_cd, item)
-            else:
-                panel._onEquipmentUpdated(item_cd, item)
-            if item_cd in panel._cds:
-                panel._onEquipmentCooldownTime(item_cd, remaining, stage == active_stage, False)
-                if hasattr(panel, '_onEquipmentCooldownInPercent'):
-                    percent = max(0.0, min(100.0, 100.0 * (total - remaining) / total)) if total > 0 else 100.0
-                    panel._onEquipmentCooldownInPercent(item_cd, percent)
+                panel._onEquipmentCooldownTime(item_cd, state[2], stage == active_stage, False)
+                touched = True
+            elif previous != state:
+                self._equipment_state[item_cd] = state
+                if previous is None or previous[:2] != state[:2] or previous[3] != state[3] or (state[2] == 0 and previous[2] > 0):
+                    item.update(quantity, stage, remaining, total)
+                    panel._onEquipmentUpdated(item_cd, item)
+                    panel._onEquipmentCooldownTime(item_cd, state[2], stage == active_stage, False)
+                else:
+                    # Snapshot refresh rewrites only the counter; full update restarts its flash. — 2026-10-28
+                    panel._onEquipmentCooldownTime(item_cd, state[2], stage == active_stage, False)
+            if item_cd in panel._cds and hasattr(panel, '_onEquipmentCooldownInPercent') and (remaining > 0.0 or previous != state):
+                percent = max(0.0, min(100.0, 100.0 * (total - remaining) / total)) if total > 0 else 100.0
+                panel._onEquipmentCooldownInPercent(item_cd, percent)
+        if touched and hasattr(panel, 'as_showEquipmentSlotsS'):
+            # An empty slot hides the whole row; re-show it after the replay re-adds real slots. — 2026-10-28
+            panel.as_showEquipmentSlotsS(True)
+        if touched:
+            self._invalidate_consumables_position()
 
     bind_consumables_panel = bind_consumables_cooldowns
 
     def prevent_consumables_hide(self, page):
         if page is not None and hasattr(page, '_setComponentsVisibility'):
             page._setComponentsVisibility(visible={'consumablesPanel', 'damagePanel'}, hidden=set())
-
-
 
 
 class SpectatorReloadDisplay(object):
@@ -1370,7 +1418,7 @@ def init():
 
     try:
         from debug_utils import LOG_NOTE
-        LOG_NOTE('[SpectatorHUD] 1.0.7 initialized')
+        LOG_NOTE('[SpectatorHUD] 1.0.9 initialized')
     except Exception:
         pass
 

@@ -45,11 +45,11 @@ mods_def = [
     {
         'folder': '01_Server_Online_Autoconnect',
         'id': 'server_online',
-        'title': 'Server Online & Autoconnect',
-        'version': '1.1.1',
+        'title': 'Smart Server',
+        'version': '1.1.2',
         'author': 'Niedvin',
         'description': 'Автоматичний вибір сервера з максимальним онлайном, розширене меню вибору сервера з числовим онлайном без обрізання та авто-релоґін після бою при дисбалансі онлайну (>=1.5x).',
-        'changes': 'Покращений вибір сервера за онлайнном та стабільний авто-релоґін після бою.',
+        'changes': 'Нова назва: Smart Server. Вибір сервера за онлайном та авто-релоґін без змін.',
         'default_checked': True,
         'clean_patterns': ['ua.server_online_autoconnect*.wotmod'],
         'clean_res_mods': [],
@@ -59,7 +59,7 @@ mods_def = [
             'Автоматичний перехід на інший сервер після бою при перекосі онлайну (>= 1.5x).'
         ],
         'files': [
-            (get_src_wotmod('ua.server_online_autoconnect_1.1.1.wotmod'), 'game_files/mods/_VERSION_/ua.server_online_autoconnect_1.1.1.wotmod'),
+            (get_src_wotmod('ua.server_online_autoconnect_1.1.2.wotmod'), 'game_files/mods/_VERSION_/ua.server_online_autoconnect_1.1.2.wotmod'),
             ('mods/configs/server_online/config.json', 'game_files/mods/configs/server_online/config.json'),
             ('mods/configs/server_online/cache.json', 'game_files/mods/configs/server_online/cache.json'),
             ('mods/configs/server_online/mod_server_online_autoconnect.py', 'game_files/mods/configs/server_online/mod_server_online_autoconnect.py')
@@ -68,11 +68,11 @@ mods_def = [
     {
         'folder': '02_Platoon_Autostart',
         'id': 'platoon_autostart',
-        'title': 'Platoon Autostart & Modern UI',
-        'version': '1.0.1',
+        'title': 'Squad+',
+        'version': '1.0.3',
         'author': 'Niedvin',
         'description': 'Автоматичний старт взводу при готовності всіх бійців, системне сповіщення про старт та модернізований компактний інтерфейс вікна взводу, сумісний з івентовими ангарами.',
-        'changes': 'Автостарт взводу та оновлений компактний UI вікна взводу для івентових ангарів.',
+        'changes': 'Нова назва: Squad+. Функціонал без змін.',
         'default_checked': True,
         'clean_patterns': ['ua.platoon_autostart*.wotmod'],
         'clean_res_mods': [
@@ -86,7 +86,7 @@ mods_def = [
             'Оновлений компактний інтерфейс вікна взводу, сумісний з івентовими ангарами.'
         ],
         'files': [
-            (get_src_wotmod('ua.platoon_autostart_1.0.1.wotmod'), 'game_files/mods/_VERSION_/ua.platoon_autostart_1.0.1.wotmod'),
+            (get_src_wotmod('ua.platoon_autostart_1.0.3.wotmod'), 'game_files/mods/_VERSION_/ua.platoon_autostart_1.0.3.wotmod'),
             ('mods/configs/platoon_autostart/config.json', 'game_files/mods/configs/platoon_autostart/config.json'),
             ('mods/configs/platoon_autostart/mod_platoon_autostart.py', 'game_files/mods/configs/platoon_autostart/mod_platoon_autostart.py')
         ]
@@ -94,11 +94,11 @@ mods_def = [
     {
         'folder': '03_Armor_Flashlight_Brightness',
         'id': 'armor_flashlight',
-        'title': 'Armor Flashlight Brightness',
-        'version': '1.0.1',
+        'title': 'Velet Penetration',
+        'version': '1.0.2',
         'author': 'Niedvin',
         'description': 'Налаштування яскравості та радіуса підсвічування коліматора/ліхтарика зон пробиття броні (зелений 1.5x, жовтий 1.1x, збільшений радіус 1.5x).',
-        'changes': 'Точніше налаштування яскравості та радіуса підсвічування зон пробиття броні.',
+        'changes': 'Нова назва: Velet Penetration. Функціонал без змін.',
         'default_checked': True,
         'clean_patterns': ['ua.armor_flashlight_brightness*.wotmod'],
         'clean_res_mods': [],
@@ -107,7 +107,7 @@ mods_def = [
             'Налаштування яскравості та збільшений радіус підсвітки зон пробиття (1.5x).'
         ],
         'files': [
-            (get_src_wotmod('ua.armor_flashlight_brightness_1.0.1.wotmod'), 'game_files/mods/_VERSION_/ua.armor_flashlight_brightness_1.0.1.wotmod'),
+            (get_src_wotmod('ua.armor_flashlight_brightness_1.0.2.wotmod'), 'game_files/mods/_VERSION_/ua.armor_flashlight_brightness_1.0.2.wotmod'),
             ('mods/configs/armor_flashlight/config.json', 'game_files/mods/configs/armor_flashlight/config.json'),
             ('mods/configs/armor_flashlight/mod_armor_flashlight_brightness.py', 'game_files/mods/configs/armor_flashlight/mod_armor_flashlight_brightness.py')
         ]
@@ -157,7 +157,7 @@ mods_def = [
         'id': 'openwg',
         'required': True,
         'title': 'OpenWG Core & Fixes',
-        'version': '2.1.2',
+        'version': '2.8.3.0000',
         'author': 'OpenWG Team',
         'description': 'Набір бібліотек OpenWG: виправлення відображення післябойових результатів, реплеїв та підтримка GameFace інтерфейсу.',
         'changes': 'Оновлення виправлень післябойових результатів, реплеїв та GameFace.',
@@ -168,21 +168,25 @@ mods_def = [
             'Пакет бібліотек OpenWG: виправлення кешу післябойових результатів, реплеїв та підтримка GameFace.'
         ],
         'files': [
-            (f'mods/{ver}/net.openwg/net.openwg.common_2.1.2.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.common_2.1.2.wotmod'),
-            (f'mods/{ver}/net.openwg/net.openwg.fix.battleresultscache_1.8.1.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.fix.battleresultscache_1.8.1.wotmod'),
-            (f'mods/{ver}/net.openwg/net.openwg.fix.battleresultsreplays_1.0.5.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.fix.battleresultsreplays_1.0.5.wotmod'),
+            (f'mods/{ver}/net.openwg/net.openwg.common_2.8.3.0000.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.common_2.8.3.0000.wotmod'),
+            (f'mods/{ver}/net.openwg/net.openwg.fix.battleresultscache_1.9.0.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.fix.battleresultscache_1.9.0.wotmod'),
+            (f'mods/{ver}/net.openwg/net.openwg.fix.battleresultsreplays_1.1.0.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.fix.battleresultsreplays_1.1.0.wotmod'),
             (f'mods/{ver}/net.openwg/net.openwg.gameface_1.2.2.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.gameface_1.2.2.wotmod')
         ],
-        'updates': [{'id': 'net.openwg.gameface', 'kind': 'gitlab', 'repo': 'openwg/wot.gameface'}]
+        'updates': [
+            {'id': 'net.openwg.gameface', 'kind': 'gitlab', 'repo': 'openwg/wot.gameface'},
+            {'id': 'net.openwg.fix.battleresultscache', 'kind': 'gitlab', 'repo': 'openwg/fixedbattleresultscache'},
+            {'id': 'net.openwg.fix.battleresultsreplays', 'kind': 'gitlab', 'repo': 'openwg/wot.fix.battleresultsreplays'}
+        ]
     },
     {
         'folder': '07_Spectator_Teammate_HUD',
         'id': 'spectator_teammate_hud',
-        'title': 'Spectator Teammate HUD',
-        'version': '1.0.7',
+        'title': 'Spectator+',
+        'version': '1.0.9',
         'author': 'Niedvin',
         'description': 'Відображає приціл у реальному часі, таймер перезарядки, стан модулів і екіпажу, а також таймери перезарядки спорядження союзника, за яким ви спостерігаєте після знищення вашого танка.',
-        'changes': 'Consumables anchored beside the tank damage panel using stable button bounds.',
+        'changes': 'Нова назва: Spectator+. Функціонал без змін.',
         'default_checked': True,
         'clean_patterns': ['ua.spectator_teammate_hud*.wotmod'],
         'clean_res_mods': [],
@@ -194,7 +198,7 @@ mods_def = [
             'Повна відсутність фонового навантаження на FPS під час живого бою.'
         ],
         'files': [
-            (get_src_wotmod('ua.spectator_teammate_hud_1.0.7.wotmod'), 'game_files/mods/_VERSION_/ua.spectator_teammate_hud_1.0.7.wotmod'),
+            (get_src_wotmod('ua.spectator_teammate_hud_1.0.9.wotmod'), 'game_files/mods/_VERSION_/ua.spectator_teammate_hud_1.0.9.wotmod'),
             ('mods/configs/spectator_teammate_hud/config.json', 'game_files/mods/configs/spectator_teammate_hud/config.json')
         ]
     },
@@ -202,10 +206,10 @@ mods_def = [
         'folder': '08_Background_FPS_Limiter',
         'id': 'background_fps_limiter',
         'title': 'Background FPS Limiter',
-        'version': '1.0.3',
+        'version': '1.0.4',
         'author': 'Niedvin',
         'description': 'Обмежує частоту кадрів (за замовчуванням 5 FPS), коли вікно гри не в фокусі (alt-tab або згортання), щоб зменшити навантаження на процесор і відеокарту; окремі перемикачі для ангару та бою.',
-        'changes': 'Native foreground detection without ctypes or VC90 runtime.',
+        'changes': 'Технічне оновлення пакета, функціонал без змін.',
         'default_checked': True,
         'clean_patterns': ['ua.background_fps_limiter*.wotmod'],
         'clean_res_mods': [],
@@ -213,10 +217,11 @@ mods_def = [
             'Обмежує частоту кадрів гри у фоновому режимі (за замовчуванням 5 FPS).',
             'Окремі перемикачі для ангару та бою.',
             'Працює і при згортанні вікна, і при переході в інше вікно (alt-tab).',
+            'Окремий повзунок FPS у фокусі, щоб гра не залипала на 60 кадрах.',
             'Зменшує навантаження на процесор і відеокарту, коли гра неактивна.'
         ],
         'files': [
-            (get_src_wotmod('ua.background_fps_limiter_1.0.3.wotmod'), 'game_files/mods/_VERSION_/ua.background_fps_limiter_1.0.3.wotmod'),
+            (get_src_wotmod('ua.background_fps_limiter_1.0.4.wotmod'), 'game_files/mods/_VERSION_/ua.background_fps_limiter_1.0.4.wotmod'),
             ('mods/configs/background_fps_limiter/config.json', 'game_files/mods/configs/background_fps_limiter/config.json'),
             ('mods/configs/background_fps_limiter/mod_background_fps_limiter.py', 'game_files/mods/configs/background_fps_limiter/mod_background_fps_limiter.py'),
             ('mods/configs/background_fps_limiter/_ua_window_focus.pyd', 'game_files/mods/configs/background_fps_limiter/_ua_window_focus.pyd')
@@ -225,11 +230,11 @@ mods_def = [
     {
         'folder': '09_Research_Button',
         'id': 'research_button',
-        'title': 'Research Button (carousel)',
-        'version': '1.2.0',
+        'title': 'Quick Research',
+        'version': '1.2.4',
         'author': 'Niedvin',
         'description': 'Кнопка дослідження на середині лівого краю кожної плитки з танком; одразу відкриває дослідження цього танка.',
-        'changes': 'Native module-button artwork with complete UI resources for automatic updates.',
+        'changes': 'Нова назва: Quick Research. Функціонал без змін.',
         'default_checked': True,
         'clean_patterns': ['ua.research_button*.wotmod'],
         'clean_res_mods': ['gui/flash/TankCarousel.swf', 'gui/maps/icons/buttons/ua_research_btn.png', 'gui/gameface/_dist/production/mono/hangar/main/bundle.js'],
@@ -239,7 +244,7 @@ mods_def = [
             'Research tree shortcut at the left edge center of occupied carousel cards.'
         ],
         'files': [
-            (get_src_wotmod('ua.research_button_1.2.0.wotmod'), 'game_files/mods/_VERSION_/ua.research_button_1.2.0.wotmod'),
+            (get_src_wotmod('ua.research_button_1.2.4.wotmod'), 'game_files/mods/_VERSION_/ua.research_button_1.2.4.wotmod'),
             (src_first(f'build/res_mods/{ver}/gui/gameface/_dist/production/mono/hangar/main/bundle.js', f'res_mods/{ver}/gui/gameface/_dist/production/mono/hangar/main/bundle.js'), 'game_files/res_mods/_VERSION_/gui/gameface/_dist/production/mono/hangar/main/bundle.js'),
             ('mods/configs/research_button/config.json', 'game_files/mods/configs/research_button/config.json'),
             ('mods/configs/research_button/mod_research_button.py', 'game_files/mods/configs/research_button/mod_research_button.py'),

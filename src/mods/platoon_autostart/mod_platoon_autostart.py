@@ -157,7 +157,7 @@ def _init_mods_settings():
         delay_ms = max(100, min(3000, delay_ms))
 
         template = {
-            'modDisplayName': 'Platoon Autostart & Modern UI',
+            'modDisplayName': 'Squad+',
             'enabled': bool(_CONFIG.get('enabled', True)),
             'column1': [
                 templates.createCheckbox(text='Увімкнути мод взводу', varName='enabled', value=bool(_CONFIG.get('enabled', True))),
@@ -187,7 +187,7 @@ def _init_mods_settings():
 
         g_modsListApi.addModification(
             id='ua.platoon_autostart',
-            name='Platoon Autostart',
+            name='Squad+',
             description='Автостарт та інтерфейс взводу',
             icon='',
             enabled=True,
@@ -764,9 +764,8 @@ def _hangar_ui_busy_reason():
             return 'modal_view'
 
         top_sub = cm.getContainer(WindowLayer.TOP_SUB_VIEW)
-        top_view = top_sub.getView() if top_sub else None
-        if top_view is not None:
-            return 'top_sub_view=%s' % getattr(top_view, 'alias', top_view)
+        if top_sub and top_sub.getViewCount(None):
+            return 'top_sub_view'
 
         from skeletons.gui.impl import IGuiLoader
         guiLoader = dependency.instance(IGuiLoader)

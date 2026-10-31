@@ -74,7 +74,7 @@ def _init_mods_settings():
             _save_config()
 
         template = {
-            'modDisplayName': 'Armor Flashlight Brightness',
+            'modDisplayName': 'Velet Penetration',
             'enabled': bool(_CONFIG.get('enabled', True)),
             'column1': [
                 templates.createCheckbox(text='Увімкнути підсвітку ліхтарика', varName='enabled', value=bool(_CONFIG.get('enabled', True))),
@@ -105,7 +105,7 @@ def _init_mods_settings():
 
         g_modsListApi.addModification(
             id='ua.armor_flashlight_brightness',
-            name='Armor Flashlight',
+            name='Velet Penetration',
             description='Яскравість ліхтарика пробиття',
             icon='',
             enabled=True,

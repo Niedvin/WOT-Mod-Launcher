@@ -14,19 +14,19 @@
 5. кожен пакет перевіряється за SHA-256, розміром і `meta.xml` (`<id>`); перед заміною створюється бекап у `<гра>\.backups\launcher\`, при збої старі файли відновлюються;
 6. лаунчер також вміє оновлювати сам себе та переносити моди в нову папку версії гри після патчу клієнта.
 
-## Склад модпаку (реліз 2026.10.27, клієнт 2.4.1.0)
+## Склад модпаку (реліз 2026.10.31, клієнт 2.4.1.1)
 
 | Мод | Версія |
 |---|---|
-| Server Online & Autoconnect | 1.1.1 |
-| Platoon Autostart & Modern UI | 1.0.1 |
-| Armor Flashlight Brightness | 1.0.1 |
+| Smart Server | 1.1.2 |
+| Squad+ | 1.0.3 |
+| Velet Penetration | 1.0.2 |
 | ModsSettings API (Izeberg) | 1.7.1 |
 | ModsList API (Poliroid) | 1.8.0 |
-| OpenWG Core & Fixes (4 пакети) | 2.1.2 / 1.8.1 / 1.0.5 / 1.2.2 |
-| Spectator Teammate HUD | 1.0.6 |
-| Background FPS Limiter | 1.0.3 |
-| Research Button | 1.2.0 |
+| OpenWG Core & Fixes (4 пакети) | 2.8.3.0000 / 1.9.0 / 1.1.0 / 1.2.2 |
+| Spectator+ | 1.0.9 |
+| Background FPS Limiter | 1.0.4 |
+| Quick Research | 1.2.4 |
 
 ## Завантаження
 
@@ -38,12 +38,12 @@
 ```json
 {
   "schema": 1,
-  "pack_version": "2026.10.27",
-  "game_version": "2.4.1.0",
+  "pack_version": "2026.10.31",
+  "game_version": "2.4.1.1",
   "launcher": { "version": "1.1.0", "url": ".../WotModLauncher.exe", "sha256": "..." },
   "mods": [
-    { "id": "ua.server_online_autoconnect", "title": "Server Online & Autoconnect",
-      "version": "1.1.1", "file": "ua.server_online_autoconnect_1.1.1.wotmod",
+    { "id": "ua.server_online_autoconnect", "title": "Smart Server",
+      "version": "1.1.2", "file": "ua.server_online_autoconnect_1.1.2.wotmod",
       "subdir": "", "url": ".../ua.server_online_autoconnect_1.1.1.wotmod",
       "sha256": "...", "size": 22265, "changes": "короткий опис змін" }
   ]

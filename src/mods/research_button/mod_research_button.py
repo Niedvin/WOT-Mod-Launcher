@@ -7,8 +7,8 @@ _CONFIG_PATH = os.path.join('mods', 'configs', 'research_button', 'config.json')
 _CONFIG = {'enabled': True}
 _HOOKS = []
 _REQUEST = 'ua.research'
-_VERSION = '1.2.0'
-_KNOWN_BUNDLE_HASHES = ('06faf1d78ababe0c81aec9a093bad96084dac4d10898aa0edbb1b7284788f8f9', '07979105c0c19ad22ae28b1b1f0987d904661adbe57ba0131427eed424e043a7', '1517f93026e78103183cbc764ff210707800a9c8912304273c1109743dfd50aa', '1bea21940e6a62874a2f326947aa44856c7422e40883ebd8e853b60ec818d62c')
+_VERSION = '1.2.4'
+_KNOWN_BUNDLE_HASHES = ('276aec093f9873fa482fcce3b8490dc7f75d10dc52cb660cd140a08a0261a23a', '323595a4d8e930f1bf59e3eddb500331e507130ea3b6e36d9cf1b4fbe3aec24f', '6d70c7aa531503931c2caa68617eea67315bc9e8c9c96ae746a854695bf0b55b', '06faf1d78ababe0c81aec9a093bad96084dac4d10898aa0edbb1b7284788f8f9', '07979105c0c19ad22ae28b1b1f0987d904661adbe57ba0131427eed424e043a7', '1517f93026e78103183cbc764ff210707800a9c8912304273c1109743dfd50aa', '1bea21940e6a62874a2f326947aa44856c7422e40883ebd8e853b60ec818d62c')
 
 
 def _ensure_packaged_file(mod_id, mod_version, member, target, accepted_sha256=None):
@@ -128,7 +128,7 @@ def init():
         bundle = os.path.join('res_mods', version, 'gui', 'gameface', '_dist', 'production', 'mono', 'hangar', 'main', 'bundle.js')
         _ensure_packaged_file('ua.research_button', _VERSION, 'res/ua_mod_payloads/research_button/bundle.js', bundle, _KNOWN_BUNDLE_HASHES)
         _install()
-        LOG_NOTE('[ResearchButton] Mod initialized version=1.2.0 enabled=%s' % _CONFIG.get('enabled', True))
+        LOG_NOTE('[ResearchButton] Mod initialized version=1.2.4 enabled=%s' % _CONFIG.get('enabled', True))
     except Exception:
         LOG_CURRENT_EXCEPTION()
 

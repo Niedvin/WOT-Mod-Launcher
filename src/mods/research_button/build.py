@@ -11,7 +11,7 @@ from mono_build import build as build_mono, game_version, MEMBER
 
 ROOT = Path(__file__).resolve().parents[2]
 WORK = Path(__file__).resolve().parent
-VERSION = '1.2.0'
+VERSION = '1.2.4'
 MOD_ID = 'ua.research_button'
 MOD_NAME = '%s_%s.wotmod' % (MOD_ID, VERSION)
 ENTRY = 'res/scripts/client/gui/mods/mod_research_button.pyc'
@@ -29,7 +29,7 @@ def main(install=False):
     pyc = source.with_suffix('.pyc').read_bytes()
     assert struct.unpack('<H', pyc[:2])[0] == 62211
     temporary = WORK / (MOD_NAME + '.tmp')
-    meta = '<root><id>%s</id><version>%s</version><name>Research Button (carousel)</name><description>Immediate Gameface carousel shortcut to vehicle modules.</description></root>' % (MOD_ID, VERSION)
+    meta = '<root><id>%s</id><version>%s</version><name>Quick Research</name><description>Immediate Gameface carousel shortcut to vehicle modules.</description></root>' % (MOD_ID, VERSION)
     with zipfile.ZipFile(temporary, 'w', compression=zipfile.ZIP_STORED) as archive:
         archive.writestr('meta.xml', meta)
         archive.writestr(ENTRY, pyc)
@@ -59,7 +59,7 @@ def main(install=False):
             shutil.copy2(live_config if live_config.exists() else WORK / 'config.json', config)
     info_path = STAGING / 'info.json'
     info = json.loads(info_path.read_text(encoding='utf-8-sig'))
-    info.update(version=VERSION, description='Кнопка дослідження на середині лівого краю кожної плитки з танком; одразу відкриває дослідження цього танка.', changes='Native module-button artwork and research glyph; complete UI payload included for automatic updates.',
+    info.update(version=VERSION, description='Кнопка дослідження на середині лівого краю кожної плитки з танком; одразу відкриває дослідження цього танка.', changes='Відступ 8–12 rem від краю картки; окремий внутрішній відступ навколо дерева досліджень.',
                 clean_res_mods=[MEMBER, 'gui/flash/TankCarousel.swf', 'gui/maps/icons/buttons/ua_research_btn.png'])
     info['size_bytes'] = sum(path.stat().st_size for path in (STAGING / 'game_files').rglob('*') if path.is_file())
     info_path.write_text(json.dumps(info, ensure_ascii=False, indent=4) + '\n', encoding='utf-8')

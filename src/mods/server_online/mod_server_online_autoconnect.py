@@ -109,7 +109,7 @@ def _init_mods_settings():
         ratio_pct = max(110, min(300, ratio_pct))
 
         template = {
-            'modDisplayName': 'Server Online & Autoconnect',
+            'modDisplayName': 'Smart Server',
             'enabled': bool(_CONFIG.get('enabled', True)),
             'column1': [
                 templates.createCheckbox(text='Увімкнути мод', varName='enabled', value=bool(_CONFIG.get('enabled', True))),
@@ -140,7 +140,7 @@ def _init_mods_settings():
 
         g_modsListApi.addModification(
             id='ua.server_online_autoconnect',
-            name='Server Online',
+            name='Smart Server',
             description='Автопідключення та онлайн',
             icon='',
             enabled=True,

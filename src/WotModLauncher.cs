@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -8,6 +8,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Net;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -25,6 +26,43 @@ using System.Windows.Forms;
 
 namespace WotModLauncher
 {
+    [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+    internal class ShellLinkCoClass { }
+
+    [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("000214F9-0000-0000-C000-000000000046")]
+    internal interface IShellLinkW
+    {
+        void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile, int cch, IntPtr pfd, uint fFlags);
+        void GetIDList(out IntPtr ppidl);
+        void SetIDList(IntPtr pidl);
+        void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszName, int cch);
+        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+        void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszDir, int cch);
+        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+        void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszArgs, int cch);
+        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+        void GetHotkey(out short pwHotkey);
+        void SetHotkey(short wHotkey);
+        void GetShowCmd(out int piShowCmd);
+        void SetShowCmd(int iShowCmd);
+        void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszIconPath, int cch, out int piIcon);
+        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
+        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, uint dwReserved);
+        void Resolve(IntPtr hwnd, uint fFlags);
+        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
+    }
+
+    [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("0000010b-0000-0000-C000-000000000046")]
+    internal interface IPersistFile
+    {
+        void GetClassID(out Guid pClassID);
+        [PreserveSig] int IsDirty();
+        void Load([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, uint dwMode);
+        void Save([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, [MarshalAs(UnmanagedType.Bool)] bool fRemember);
+        void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string pszFileName);
+        void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string ppszFileName);
+    }
+
     public class LauncherConfig
     {
         public string game_path { get; set; }
@@ -488,17 +526,18 @@ namespace WotModLauncher
                     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Microsoft\Windows\Start Menu\Programs\Wargaming.net\World_of_Tanks_EU\World of Tanks EU.lnk")
                 };
 
-                Type shellType = Type.GetTypeFromProgID("WScript.Shell");
-                if (shellType == null) return;
-                object shell = Activator.CreateInstance(shellType);
-
                 foreach (string lnkPath in candidateShortcuts)
                 {
                     if (!File.Exists(lnkPath)) continue;
-                    object sc = shellType.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { lnkPath });
-                    string target = (string)sc.GetType().InvokeMember("TargetPath", BindingFlags.GetProperty, null, sc, null) ?? "";
-                    if (target.EndsWith("wgc_api.exe", StringComparison.OrdinalIgnoreCase))
+
+                    IShellLinkW link = (IShellLinkW)new ShellLinkCoClass();
+                    try
                     {
+                        ((IPersistFile)link).Load(lnkPath, 0);
+                        StringBuilder target = new StringBuilder(1024);
+                        link.GetPath(target, target.Capacity, IntPtr.Zero, 0);
+                        if (!target.ToString().EndsWith("wgc_api.exe", StringComparison.OrdinalIgnoreCase)) continue;
+
                         string bkpDir = Path.Combine(LauncherDir, "shortcuts_backup");
                         Directory.CreateDirectory(bkpDir);
                         string bkpName = (lnkPath.IndexOf("Start Menu", StringComparison.OrdinalIgnoreCase) >= 0 ? "startmenu_" : "desktop_") + Path.GetFileName(lnkPath);
@@ -508,11 +547,15 @@ namespace WotModLauncher
                         string iconFile = Path.Combine(gamePath, "game_metadata", "game.ico");
                         if (!File.Exists(iconFile)) iconFile = Path.Combine(gamePath, "WorldOfTanks.exe");
 
-                        sc.GetType().InvokeMember("TargetPath", BindingFlags.SetProperty, null, sc, new object[] { launcherExe });
-                        sc.GetType().InvokeMember("Arguments", BindingFlags.SetProperty, null, sc, new object[] { "" });
-                        sc.GetType().InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, sc, new object[] { gamePath });
-                        sc.GetType().InvokeMember("IconLocation", BindingFlags.SetProperty, null, sc, new object[] { iconFile + ",0" });
-                        sc.GetType().InvokeMember("Save", BindingFlags.InvokeMethod, null, sc, null);
+                        link.SetPath(launcherExe);
+                        link.SetArguments("");
+                        link.SetWorkingDirectory(gamePath);
+                        link.SetIconLocation(iconFile, 0);
+                        ((IPersistFile)link).Save(lnkPath, true);
+                    }
+                    finally
+                    {
+                        Marshal.FinalReleaseComObject(link);
                     }
                 }
             }

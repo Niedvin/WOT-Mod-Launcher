@@ -8,6 +8,8 @@ using System.IO;
 using System.IO.Compression;
 using System.Net;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Web.Script.Serialization;
@@ -58,6 +60,43 @@ namespace WotModpackInstaller
         public string repo { get; set; }
     }
 
+    [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+    internal class ShellLinkCoClass { }
+
+    [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("000214F9-0000-0000-C000-000000000046")]
+    internal interface IShellLinkW
+    {
+        void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile, int cch, IntPtr pfd, uint fFlags);
+        void GetIDList(out IntPtr ppidl);
+        void SetIDList(IntPtr pidl);
+        void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszName, int cch);
+        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+        void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszDir, int cch);
+        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+        void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszArgs, int cch);
+        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+        void GetHotkey(out short pwHotkey);
+        void SetHotkey(short wHotkey);
+        void GetShowCmd(out int piShowCmd);
+        void SetShowCmd(int iShowCmd);
+        void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszIconPath, int cch, out int piIcon);
+        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
+        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, uint dwReserved);
+        void Resolve(IntPtr hwnd, uint fFlags);
+        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
+    }
+
+    [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("0000010b-0000-0000-C000-000000000046")]
+    internal interface IPersistFile
+    {
+        void GetClassID(out Guid pClassID);
+        [PreserveSig] int IsDirty();
+        void Load([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, uint dwMode);
+        void Save([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, [MarshalAs(UnmanagedType.Bool)] bool fRemember);
+        void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string pszFileName);
+        void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string ppszFileName);
+    }
+
     public class MainForm : Form
     {
         private Panel headerPanel;
@@ -87,7 +126,8 @@ namespace WotModpackInstaller
 
         private ProgressBar prgInstall;
         private Label lblStatus;
-        private TextBox txtLog;
+        private RichTextBox txtLog;
+        private Button btnOpenLog;
 
         private Button btnInstall;
         private Button btnLaunchGame;
@@ -104,6 +144,15 @@ namespace WotModpackInstaller
         public MainForm()
         {
             InitializeComponent();
+            Log("=== Інсталятор модпаку WoT від Niedvin ===");
+            Log(string.Format("Версія інсталятора: {0} (збірка {1:yyyy-MM-dd HH:mm})",
+                Assembly.GetExecutingAssembly().GetName().Version,
+                File.GetLastWriteTime(Assembly.GetExecutingAssembly().Location)));
+            Log(string.Format("Windows: {0} ({1}), користувач: {2}", Environment.OSVersion.VersionString,
+                Environment.Is64BitOperatingSystem ? "64-bit" : "32-bit", Environment.UserName));
+            Log("Запущено з: " + Assembly.GetExecutingAssembly().Location);
+            Log("Робочий стіл: " + Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));
+            Log("Файл логу: " + LogFilePath);
             LocateModsFolder();
             LoadModsList();
             AutoDetectGame();
@@ -197,7 +246,7 @@ namespace WotModpackInstaller
             chkListMods.CheckOnClick = true;
             chkListMods.BorderStyle = BorderStyle.FixedSingle;
             chkListMods.SelectedIndexChanged += ChkListMods_SelectedIndexChanged;
-            chkListMods.ItemCheck += (s, e) => BeginInvoke(new Action(UpdateModCounter));
+            chkListMods.ItemCheck += (s, e) => { if (IsHandleCreated) BeginInvoke(new Action(UpdateModCounter)); };
 
             btnSelectAll = MakeButton("Вибрати всі", Color.FromArgb(39, 48, 67), Color.FromArgb(233, 237, 245), false);
             btnSelectAll.Location = new Point(14, 196);
@@ -299,9 +348,14 @@ namespace WotModpackInstaller
 
             lblStatus = new Label();
             lblStatus.Location = new Point(16, 570);
-            lblStatus.Size = new Size(824, 18);
+            lblStatus.Size = new Size(720, 18);
             lblStatus.ForeColor = Color.FromArgb(150, 162, 186);
             lblStatus.Text = "Готово до встановлення";
+
+            btnOpenLog = MakeButton("Лог файл", Color.FromArgb(39, 48, 67), Color.FromArgb(233, 237, 245), false);
+            btnOpenLog.Location = new Point(744, 564);
+            btnOpenLog.Size = new Size(96, 24);
+            btnOpenLog.Click += (s, e) => OpenLogFile();
 
             prgInstall = new ProgressBar();
             prgInstall.Location = new Point(16, 592);
@@ -311,19 +365,22 @@ namespace WotModpackInstaller
             grpLog.Location = new Point(16, 618);
             grpLog.Size = new Size(824, 66);
 
-            txtLog = new TextBox();
+            txtLog = new RichTextBox();
             txtLog.Location = new Point(10, 8);
             txtLog.Size = new Size(804, 50);
-            txtLog.Multiline = true;
             txtLog.ReadOnly = true;
-            txtLog.ScrollBars = ScrollBars.Vertical;
+            txtLog.DetectUrls = false;
+            txtLog.WordWrap = true;
+            txtLog.ScrollBars = RichTextBoxScrollBars.Vertical;
             txtLog.Font = new Font("Consolas", 8.5F, FontStyle.Regular, GraphicsUnit.Point);
             txtLog.BackColor = Color.FromArgb(15, 19, 29);
             txtLog.ForeColor = Color.FromArgb(143, 162, 191);
             txtLog.BorderStyle = BorderStyle.None;
+            txtLog.DoubleClick += (s, e) => OpenLogFile();
             grpLog.Controls.Add(txtLog);
             this.Controls.Add(grpLog);
             this.Controls.Add(lblStatus);
+            this.Controls.Add(btnOpenLog);
             this.Controls.Add(prgInstall);
 
             btnInstall = MakeButton("Встановити вибрані моди", Color.FromArgb(47, 125, 58), Color.White, true);
@@ -480,11 +537,12 @@ namespace WotModpackInstaller
             modsRootPath = ResolveModsRoot();
             if (modsRootPath != null)
             {
-                Log("[Джерело модів] " + modsRootPath);
+                LogOk("Джерело модів: " + modsRootPath);
             }
             else
             {
                 modsRootPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Mods");
+                LogFail("Джерело модів не знайдено (вбудований архів недоступний), пробую: " + modsRootPath);
             }
         }
 
@@ -495,7 +553,7 @@ namespace WotModpackInstaller
 
             if (!Directory.Exists(modsRootPath))
             {
-                Log("УВАГА: Папку Mods не знайдено за шляхом: " + modsRootPath);
+                LogFail("Папку Mods не знайдено: " + modsRootPath);
                 Log("Переконайтеся, що архів розархівовано повністю перед запуском.");
                 return;
             }
@@ -508,23 +566,36 @@ namespace WotModpackInstaller
             foreach (var dir in dirs)
             {
                 string infoFile = Path.Combine(dir, "info.json");
-                if (File.Exists(infoFile))
+                if (!File.Exists(infoFile))
                 {
-                    try
-                    {
-                        string json = File.ReadAllText(infoFile, System.Text.Encoding.UTF8);
-                        ModItem item = serializer.Deserialize<ModItem>(json);
-                        item.FolderPath = dir;
-                        loadedMods.Add(item);
-                        if (item.required) continue;
+                    LogWarn("Пропущено теку без info.json: " + Path.GetFileName(dir));
+                    continue;
+                }
 
-                        int idx = chkListMods.Items.Add(item);
-                        chkListMods.SetItemChecked(idx, item.default_checked);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log("Помилка читання info.json в " + Path.GetFileName(dir) + ": " + ex.Message);
-                    }
+                ModItem item;
+                try
+                {
+                    string json = File.ReadAllText(infoFile, System.Text.Encoding.UTF8);
+                    item = serializer.Deserialize<ModItem>(json);
+                }
+                catch (Exception ex)
+                {
+                    LogFail("info.json не прочитано: " + Path.GetFileName(dir) + " — " + RootCause(ex));
+                    continue;
+                }
+
+                item.FolderPath = dir;
+                loadedMods.Add(item);
+                if (item.required) continue;
+
+                try
+                {
+                    int idx = chkListMods.Items.Add(item);
+                    chkListMods.SetItemChecked(idx, item.default_checked);
+                }
+                catch (Exception ex)
+                {
+                    LogWarn("Позначку за замовчуванням не встановлено для " + item.title + ": " + RootCause(ex));
                 }
             }
 
@@ -535,9 +606,9 @@ namespace WotModpackInstaller
             UpdateModCounter();
 
             var req = loadedMods.FindAll(m => m.required).ConvertAll(m => m.title);
-            Log(string.Format("Модів на вибір: {0}", loadedMods.Count - req.Count));
-            if (req.Count > 0)
-                Log("Встановлюються автоматично: " + string.Join(", ", req.ToArray()));
+            LogOk(string.Format("Модів у збірці: {0} на вибір + {1} системних", loadedMods.Count - req.Count, req.Count));
+            foreach (ModItem mod in loadedMods)
+                Log(string.Format("   • {0} v{1}{2}", mod.title, mod.version, mod.required ? " (системний, завжди)" : ""));
         }
 
         private void ChkListMods_SelectedIndexChanged(object sender, EventArgs e)
@@ -557,11 +628,13 @@ namespace WotModpackInstaller
             if (!string.IsNullOrEmpty(foundPath))
             {
                 txtGamePath.Text = foundPath;
+                LogOk("Гру знайдено автоматично: " + foundPath + " (версія " + detectedGameVersion + ")");
             }
             else
             {
                 txtGamePath.Text = "";
                 ValidateGamePath();
+                LogWarn("Гру не знайдено автоматично — вкажіть папку World of Tanks вручну.");
             }
         }
 
@@ -938,6 +1011,7 @@ namespace WotModpackInstaller
 
             if (selected.Count == 0)
             {
+                LogWarn("Натиснуто «Встановити», але не вибрано жодного моду");
                 MessageBox.Show("Будь ласка, оберіть хоча б один мод для встановлення.", "Попередження", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -947,9 +1021,12 @@ namespace WotModpackInstaller
             string gamePath = txtGamePath.Text.Trim();
             if (!IsValidWotDir(gamePath))
             {
+                LogFail("Шлях до гри недійсний: '" + gamePath + "'");
                 MessageBox.Show("Шлях до гри недійсний. Вкажіть кореневу папку World of Tanks.", "Помилка", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
+            LogOk("Гра підтверджена: " + gamePath);
+            Log(string.Format("Вибрано модів: {0} (разом із системними)", selected.Count));
 
             Process[] runningProcs = new Process[0];
             try
@@ -972,6 +1049,7 @@ namespace WotModpackInstaller
 
                 if (dr == DialogResult.Yes)
                 {
+                    Log("Гра запущена — закриваю перед встановленням");
                     foreach (var p in runningProcs)
                     {
                         try
@@ -983,12 +1061,16 @@ namespace WotModpackInstaller
                                 p.WaitForExit(2000);
                             }
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            LogWarn("Не вдалося закрити процес гри: " + RootCause(ex));
+                        }
                     }
                     Thread.Sleep(800);
                 }
                 else
                 {
+                    Log("Встановлення скасовано: гра працює");
                     return;
                 }
             }
@@ -998,6 +1080,7 @@ namespace WotModpackInstaller
             btnSelectAll.Enabled = false;
             btnDeselectAll.Enabled = false;
             chkListMods.Enabled = false;
+            lblStatus.ForeColor = Color.FromArgb(150, 162, 186);
 
             bool installLauncher = chkInstallLauncher.Checked;
             bool hijackShortcuts = chkHijackShortcuts.Checked;
@@ -1008,18 +1091,25 @@ namespace WotModpackInstaller
 
         private void RunInstallation(string gamePath, List<ModItem> mods, bool cleanOld, bool doBackup, bool installLauncher, bool hijackShortcuts)
         {
+            Stopwatch watch = Stopwatch.StartNew();
+            int copied = 0, failedFiles = 0, cleaned = 0, backedUp = 0, modsDone = 0;
             try
             {
                 if (!prefetchDone.WaitOne(0))
                 {
                     UpdateStatus("Очікування завантаження оновлень...");
                     if (!prefetchDone.WaitOne(90000))
-                        Log("[Оновлення] Завантаження не завершилось за 90 с, ставлю версії з архіву");
+                        LogWarn("[Оновлення] Перевірка не завершилась за 90 с — ставлю версії з архіву");
                 }
+
                 UpdateStatus("Початок встановлення...");
-                Log("=== ПОЧАТОК ВСТАНОВЛЕННЯ МОДІВ ===");
+                Log("=== ПОЧАТОК ВСТАНОВЛЕННЯ ===");
                 Log("Шлях до гри: " + gamePath);
-                Log("Цільова версія гри: " + detectedGameVersion);
+                Log("Версія гри: " + detectedGameVersion);
+                Log("Джерело модів: " + modsRootPath);
+                Log(string.Format("Опції: очищення={0}, бекап={1}, лаунчер={2}, ярлики={3}",
+                    OnOff(cleanOld), OnOff(doBackup), OnOff(installLauncher), OnOff(hijackShortcuts)));
+                Log(string.Format("Модів до встановлення: {0}", mods.Count));
 
                 string backupDir = "";
                 if (doBackup)
@@ -1035,11 +1125,11 @@ namespace WotModpackInstaller
                                 try
                                 {
                                     Directory.Delete(oldBkp, true);
-                                    Log("Видалено попередню резервну копію: " + Path.GetFileName(oldBkp));
+                                    Log("Прибрано старий бекап: " + Path.GetFileName(oldBkp));
                                 }
                                 catch (Exception ex)
                                 {
-                                    Log("Не вдалося видалити старий бекап " + Path.GetFileName(oldBkp) + ": " + ex.Message);
+                                    LogWarn("Не вдалося прибрати старий бекап " + Path.GetFileName(oldBkp) + ": " + RootCause(ex));
                                 }
                             }
                         }
@@ -1048,25 +1138,44 @@ namespace WotModpackInstaller
 
                     backupDir = Path.Combine(backupsRoot, "modpack_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
                     Directory.CreateDirectory(backupDir);
-                    Log("Папка резервного копіювання: " + backupDir);
+                    LogOk("Папка резервних копій: " + backupDir);
+                }
+                else
+                {
+                    LogWarn("Бекап вимкнено — попередні файли не зберігаються");
                 }
 
                 int totalSteps = mods.Count * 2;
                 int currentStep = 0;
+                int index = 0;
 
                 foreach (var mod in mods)
                 {
-                    UpdateStatus("Обробка: " + mod.title);
+                    index++;
+                    UpdateStatus(string.Format("Мод {0}/{1}: {2}", index, mods.Count, mod.title));
+                    Log(string.Format("--- [{0}/{1}] {2} v{3}{4} ---", index, mods.Count, mod.title, mod.version,
+                        mod.required ? " (системний)" : ""));
+                    Log("    джерело: " + mod.FolderPath);
 
                     if (cleanOld)
                     {
-                        CleanModOldVersions(gamePath, mod, backupDir);
+                        int[] clean = CleanModOldVersions(gamePath, mod, backupDir);
+                        cleaned += clean[0];
+                        backedUp += clean[1];
+                        Log(string.Format("    очищення: прибрано файлів {0}, у бекап {1}", clean[0], clean[1]));
                     }
 
                     currentStep++;
                     UpdateProgress((int)((currentStep / (double)totalSteps) * 100));
 
-                    InstallModFiles(gamePath, mod, backupDir);
+                    int[] copy = InstallModFiles(gamePath, mod, backupDir);
+                    copied += copy[0];
+                    failedFiles += copy[1];
+                    backedUp += copy[2];
+                    Log(string.Format("    копіювання: файлів {0}, помилок {1}, у бекап {2}", copy[0], copy[1], copy[2]));
+                    if (copy[1] > 0)
+                        LogWarn("    частину файлів моду не скопійовано — див. рядки [FAIL] вище");
+                    modsDone++;
 
                     currentStep++;
                     UpdateProgress((int)((currentStep / (double)totalSteps) * 100));
@@ -1079,17 +1188,48 @@ namespace WotModpackInstaller
                         if (Directory.GetFiles(backupDir, "*", SearchOption.AllDirectories).Length == 0)
                         {
                             Directory.Delete(backupDir, true);
+                            Log("Бекап порожній (усі файли нові) — папку прибрано");
+                        }
+                        else
+                        {
+                            LogOk("Бекап збережено: " + backupDir);
                         }
                     }
                     catch { }
                 }
 
                 if (installLauncher)
-                    InstallLauncherAndShortcuts(gamePath, hijackShortcuts);
+                {
+                    try
+                    {
+                        InstallLauncherAndShortcuts(gamePath, hijackShortcuts);
+                    }
+                    catch (Exception ex)
+                    {
+                        LogWarn("Лаунчер встановлено не повністю: " + RootCause(ex));
+                        Log("Деталі: " + ex);
+                    }
+                }
+                else
+                {
+                    LogWarn("Лаунчер не встановлювався (галочку знято)");
+                }
 
                 UpdateProgress(100);
-                UpdateStatus("Встановлення успішно завершено!");
-                Log("=== УСПІШНО! ВСІ ВИБРАНІ МОДИ ВСТАНОВЛЕНО ===");
+                UpdateStatus(failedFiles == 0
+                    ? "Встановлення успішно завершено!"
+                    : string.Format("Завершено з попередженнями: не скопійовано файлів {0}", failedFiles));
+                Log(string.Format("=== ГОТОВО: модів {0}, файлів {1}, помилок {2}, прибрано старих {3}, у бекап {4}, час {5:0.0} с ===",
+                    modsDone, copied, failedFiles, cleaned, backedUp, watch.Elapsed.TotalSeconds));
+                if (failedFiles == 0) LogOk("Помилок копіювання немає");
+                else LogWarn(string.Format("Не скопійовано файлів: {0} — перевірте рядки [FAIL] вище", failedFiles));
+                Log("Повний лог: " + LogFilePath);
+
+                bool hasErrors = failedFiles > 0;
+                string box = string.Format("Моди встановлені у World of Tanks!\nМодифікацій: {0}\nВерсія гри: {1}",
+                    mods.Count, detectedGameVersion);
+                if (hasErrors)
+                    box += string.Format("\n\nНе скопійовано файлів: {0}.\nПодробиці — кнопка «Лог файл».", failedFiles);
 
                 this.Invoke(new Action(() => {
                     btnInstall.Enabled = true;
@@ -1098,17 +1238,18 @@ namespace WotModpackInstaller
                     btnDeselectAll.Enabled = true;
                     chkListMods.Enabled = true;
                     btnLaunchGame.Enabled = true;
-                    MessageBox.Show(
-                        string.Format("Моди успішно встановлені у World of Tanks!\nВстановлено модифікацій: {0}\nВерсія гри: {1}", mods.Count, detectedGameVersion),
-                        "Встановлення завершено",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Information
-                    );
+                    lblStatus.ForeColor = hasErrors ? Color.FromArgb(229, 160, 40) : Color.FromArgb(111, 207, 139);
+                    MessageBox.Show(box, "Встановлення завершено", MessageBoxButtons.OK,
+                        hasErrors ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
                 }));
             }
             catch (Exception ex)
             {
-                Log("КРИТИЧНА ПОМИЛКА: " + ex.Message);
+                string reason = RootCause(ex);
+                LogFail("КРИТИЧНА ПОМИЛКА: " + ex);
+                Log(string.Format("До збою встигли: модів {0}, файлів {1}, помилок {2}, час {3:0.0} с",
+                    modsDone, copied, failedFiles, watch.Elapsed.TotalSeconds));
+                Log("Повний лог: " + LogFilePath);
                 UpdateStatus("Помилка під час встановлення.");
                 this.Invoke(new Action(() => {
                     btnInstall.Enabled = true;
@@ -1116,13 +1257,21 @@ namespace WotModpackInstaller
                     btnSelectAll.Enabled = true;
                     btnDeselectAll.Enabled = true;
                     chkListMods.Enabled = true;
-                    MessageBox.Show("Під час встановлення виникла помилка:\n" + ex.Message, "Помилка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    lblStatus.ForeColor = Color.FromArgb(224, 108, 108);
+                    MessageBox.Show("Під час встановлення виникла помилка:\n" + reason + "\n\nДеталі — кнопка «Лог файл».",
+                        "Помилка", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }));
+            }
+            finally
+            {
+                watch.Stop();
             }
         }
 
-        internal void CleanModOldVersions(string gamePath, ModItem mod, string backupDir)
+        internal int[] CleanModOldVersions(string gamePath, ModItem mod, string backupDir)
         {
+            int removed = 0, backed = 0;
+
             if (mod.clean_patterns != null)
             {
                 string targetVerDir = Path.Combine(gamePath, "mods", detectedGameVersion);
@@ -1131,7 +1280,9 @@ namespace WotModpackInstaller
                     foreach (var pObj in mod.clean_patterns)
                     {
                         string pat = pObj.ToString();
-                        CleanByPattern(targetVerDir, pat, backupDir, gamePath);
+                        int[] r = CleanByPattern(targetVerDir, pat, backupDir, gamePath);
+                        removed += r[0];
+                        backed += r[1];
                     }
                 }
 
@@ -1145,7 +1296,9 @@ namespace WotModpackInstaller
                         {
                             foreach (var pObj in mod.clean_patterns)
                             {
-                                CleanByPattern(vDir, pObj.ToString(), backupDir, gamePath);
+                                int[] r = CleanByPattern(vDir, pObj.ToString(), backupDir, gamePath);
+                                removed += r[0];
+                                backed += r[1];
                             }
                         }
                     }
@@ -1186,13 +1339,15 @@ namespace WotModpackInstaller
                                     string bkp = Path.Combine(backupDir, "res_mods", vName, rel);
                                     Directory.CreateDirectory(Path.GetDirectoryName(bkp));
                                     File.Copy(fullPath, bkp, true);
+                                    backed++;
                                 }
                                 File.Delete(fullPath);
-                                Log("[Очищення res_mods] Видалено: " + vName + "/" + rel);
+                                removed++;
+                                Log("Прибрано старий файл: res_mods/" + vName + "/" + rel);
                             }
                             catch (Exception ex)
                             {
-                                Log("[Очищення res_mods] Не вдалося видалити: " + rel + " (" + ex.Message + ")");
+                                LogWarn("Не вдалося прибрати res_mods/" + vName + "/" + rel + ": " + RootCause(ex));
                             }
                         }
                         else if (Directory.Exists(fullPath))
@@ -1200,17 +1355,24 @@ namespace WotModpackInstaller
                             try
                             {
                                 Directory.Delete(fullPath, true);
-                                Log("[Очищення res_mods] Видалено теку: " + vName + "/" + rel);
+                                removed++;
+                                Log("Прибрано стару теку: res_mods/" + vName + "/" + rel);
                             }
-                            catch { }
+                            catch (Exception ex)
+                            {
+                                LogWarn("Не вдалося прибрати теку res_mods/" + vName + "/" + rel + ": " + RootCause(ex));
+                            }
                         }
                     }
                 }
             }
+
+            return new int[] { removed, backed };
         }
 
-        private void CleanByPattern(string baseDir, string pattern, string backupDir, string gamePath)
+        private int[] CleanByPattern(string baseDir, string pattern, string backupDir, string gamePath)
         {
+            int removed = 0, backed = 0;
             string dirToSearch = baseDir;
             string searchPattern = pattern;
 
@@ -1244,30 +1406,38 @@ namespace WotModpackInstaller
                                 string bkp = Path.Combine(backupDir, rel);
                                 Directory.CreateDirectory(Path.GetDirectoryName(bkp));
                                 File.Copy(f, bkp, true);
+                                backed++;
                             }
                             File.Delete(f);
-                            Log("[Очищення] Видалено стару версію: " + Path.GetFileName(f));
+                            removed++;
+                            Log("Прибрано стару версію: " + Path.GetFileName(f));
                         }
                         catch (Exception ex)
                         {
-                            Log("[Очищення] Не вдалося видалити: " + Path.GetFileName(f) + " (" + ex.Message + ")");
+                            LogWarn("Не вдалося прибрати " + Path.GetFileName(f) + ": " + RootCause(ex));
                         }
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    LogWarn("Помилка пошуку за шаблоном '" + pattern + "': " + RootCause(ex));
+                }
             }
+            return new int[] { removed, backed };
         }
 
-        private void InstallModFiles(string gamePath, ModItem mod, string backupDir)
+        private int[] InstallModFiles(string gamePath, ModItem mod, string backupDir)
         {
+            int copied = 0, failed = 0, backed = 0;
             string srcRoot = Path.Combine(mod.FolderPath, "game_files");
             if (!Directory.Exists(srcRoot))
             {
-                Log("УВАГА: Не знайдено game_files для " + mod.title);
-                return;
+                LogFail("Не знайдено папку game_files для " + mod.title);
+                return new int[] { 0, 1, 0 };
             }
 
             var allFiles = Directory.GetFiles(srcRoot, "*", SearchOption.AllDirectories);
+            Log(string.Format("    файлів у моді: {0}", allFiles.Length));
             foreach (var file in allFiles)
             {
                 string rel = file.Substring(srcRoot.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -1282,10 +1452,18 @@ namespace WotModpackInstaller
 
                 if (!string.IsNullOrEmpty(backupDir) && File.Exists(destPath))
                 {
-                    string bkpFile = Path.Combine(backupDir, rel);
-                    string bkpFileDir = Path.GetDirectoryName(bkpFile);
-                    if (!Directory.Exists(bkpFileDir)) Directory.CreateDirectory(bkpFileDir);
-                    File.Copy(destPath, bkpFile, true);
+                    try
+                    {
+                        string bkpFile = Path.Combine(backupDir, rel);
+                        string bkpFileDir = Path.GetDirectoryName(bkpFile);
+                        if (!Directory.Exists(bkpFileDir)) Directory.CreateDirectory(bkpFileDir);
+                        File.Copy(destPath, bkpFile, true);
+                        backed++;
+                    }
+                    catch (Exception ex)
+                    {
+                        LogWarn("Не вдалося зробити бекап " + rel + ": " + RootCause(ex));
+                    }
                 }
 
                 bool isNew = !File.Exists(destPath);
@@ -1294,13 +1472,17 @@ namespace WotModpackInstaller
                     File.Copy(file, destPath, true);
                     if (isNew && !string.IsNullOrEmpty(backupDir))
                         File.AppendAllText(Path.Combine(backupDir, NewFilesManifest), rel + Environment.NewLine, System.Text.Encoding.UTF8);
-                    Log(string.Format("[Встановлено] {0} -> {1}", mod.title, rel));
+                    copied++;
+                    Log("    записано: " + rel + (isNew ? " (новий)" : " (заміна)"));
                 }
                 catch (Exception ex)
                 {
-                    Log(string.Format("[Помилка запису] {0}: {1}", rel, ex.Message));
+                    failed++;
+                    LogFail("Не записано " + rel + ": " + RootCause(ex));
                 }
             }
+
+            return new int[] { copied, failed, backed };
         }
 
         internal static string GetLauncherInstallDir()
@@ -1327,17 +1509,27 @@ namespace WotModpackInstaller
 
         private void InstallLauncherAndShortcuts(string gamePath, bool hijackStandard)
         {
+            Log("Лаунчер: пошук WotModLauncher.exe...");
             string srcExe = LocateStagedLauncherExe();
             if (srcExe == null)
             {
-                Log("[Лаунчер] Файл Launcher\\WotModLauncher.exe не знайдено в папці інсталятора.");
+                LogFail("Лаунчер: WotModLauncher.exe не знайдено ні в папці інсталятора, ні у вбудованому архіві");
                 return;
             }
+            Log("    джерело лаунчера: " + srcExe);
 
             string targetDir = GetLauncherInstallDir();
             Directory.CreateDirectory(targetDir);
             string dstExe = Path.Combine(targetDir, "WotModLauncher.exe");
-            File.Copy(srcExe, dstExe, true);
+            try
+            {
+                File.Copy(srcExe, dstExe, true);
+            }
+            catch (Exception ex)
+            {
+                LogFail("Лаунчер: файл не скопійовано (закрийте лаунчер, якщо він запущений): " + RootCause(ex));
+                return;
+            }
 
             var ser = new JavaScriptSerializer();
             string cfgJson = ser.Serialize(new Dictionary<string, object>
@@ -1345,16 +1537,23 @@ namespace WotModpackInstaller
                 { "game_path", gamePath },
                 { "hijack_shortcuts", hijackStandard }
             });
-            File.WriteAllText(Path.Combine(targetDir, "launcher.json"), cfgJson, System.Text.Encoding.UTF8);
-            Log("[Лаунчер] Встановлено у: " + dstExe);
+            string cfgPath = Path.Combine(targetDir, "launcher.json");
+            File.WriteAllText(cfgPath, cfgJson, System.Text.Encoding.UTF8);
+            LogOk("Лаунчер встановлено: " + dstExe);
+            Log("    налаштування лаунчера: " + cfgPath);
 
             string iconFile = Path.Combine(gamePath, "game_metadata", "game.ico");
             if (!File.Exists(iconFile)) iconFile = Path.Combine(gamePath, "WorldOfTanks.exe");
+            if (File.Exists(iconFile)) Log("    іконка ярликів: " + iconFile);
+            else LogWarn("    іконку гри не знайдено — ярлики будуть зі стандартною іконкою");
 
             string desktopDir = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
             string modShortcut = Path.Combine(desktopDir, "World of Tanks EU (модпак).lnk");
-            CreateOrUpdateShortcut(modShortcut, dstExe, "", gamePath, iconFile + ",0", "Запуск World of Tanks з автооновленням модів");
-            Log("[Лаунчер] Створено ярлик: World of Tanks EU (модпак).lnk");
+            if (!TryCreateShortcut(modShortcut, dstExe, "", gamePath, iconFile, 0, "Запуск World of Tanks з автооновленням модів", "World of Tanks EU (модпак).lnk"))
+            {
+                string startMenuDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Microsoft\Windows\Start Menu\Programs\Wot Modpack");
+                TryCreateShortcut(Path.Combine(startMenuDir, "World of Tanks EU (модпак).lnk"), dstExe, "", gamePath, iconFile, 0, "Запуск World of Tanks з автооновленням модів", "меню Пуск: Wot Modpack");
+            }
 
             if (hijackStandard)
             {
@@ -1367,34 +1566,91 @@ namespace WotModpackInstaller
                     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Microsoft\Windows\Start Menu\Programs\Wargaming.net\World_of_Tanks_EU\World of Tanks EU.lnk")
                 };
 
+                int hijacked = 0;
                 foreach (string lnk in stdShortcuts)
                 {
-                    if (!File.Exists(lnk)) continue;
+                    if (!File.Exists(lnk))
+                    {
+                        Log("    стандартний ярлик відсутній: " + lnk);
+                        continue;
+                    }
                     string prefix = lnk.IndexOf("Start Menu", StringComparison.OrdinalIgnoreCase) >= 0 ? "startmenu_" : "desktop_";
                     string bkpPath = Path.Combine(bkpDir, prefix + Path.GetFileName(lnk));
-                    if (!File.Exists(bkpPath))
-                        File.Copy(lnk, bkpPath, false);
+                    try
+                    {
+                        if (!File.Exists(bkpPath)) File.Copy(lnk, bkpPath, false);
+                    }
+                    catch (Exception ex)
+                    {
+                        LogWarn("    бекап ярлика не створено: " + RootCause(ex));
+                    }
 
-                    CreateOrUpdateShortcut(lnk, dstExe, "", gamePath, iconFile + ",0", "World of Tanks EU");
-                    Log("[Лаунчер] Вбудовано у стандартний ярлик: " + Path.GetFileName(lnk));
+                    if (TryCreateShortcut(lnk, dstExe, "", gamePath, iconFile, 0, "World of Tanks EU", "стандартний ярлик " + Path.GetFileName(lnk)))
+                        hijacked++;
                 }
+                Log(string.Format("    переписано стандартних ярликів: {0} з {1}", hijacked, stdShortcuts.Length));
+            }
+            else
+            {
+                Log("    стандартні ярлики гри не змінювались (галочку знято)");
+            }
+
+            VerifyLauncherShortcut(modShortcut);
+        }
+
+        private void VerifyLauncherShortcut(string lnkPath)
+        {
+            if (File.Exists(lnkPath)) LogOk("Ярлик модпаку на місці: " + lnkPath);
+            else LogWarn("Ярлика модпаку немає: " + lnkPath);
+        }
+
+        internal static string OnOff(bool value)
+        {
+            return value ? "так" : "ні";
+        }
+
+        internal static string RootCause(Exception ex)
+        {
+            Exception e = ex;
+            while (e.InnerException != null) e = e.InnerException;
+            return string.IsNullOrEmpty(e.Message) ? e.GetType().Name : e.Message;
+        }
+
+        internal static void CreateOrUpdateShortcut(string lnkPath, string targetPath, string args, string workDir, string iconFile, int iconIndex, string description)
+        {
+            string dir = Path.GetDirectoryName(lnkPath);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                Directory.CreateDirectory(dir);
+
+            IShellLinkW link = (IShellLinkW)new ShellLinkCoClass();
+            try
+            {
+                link.SetPath(targetPath);
+                if (!string.IsNullOrEmpty(args)) link.SetArguments(args);
+                if (!string.IsNullOrEmpty(workDir)) link.SetWorkingDirectory(workDir);
+                if (!string.IsNullOrEmpty(iconFile)) link.SetIconLocation(iconFile, iconIndex);
+                if (!string.IsNullOrEmpty(description)) link.SetDescription(description);
+                ((IPersistFile)link).Save(lnkPath, true);
+            }
+            finally
+            {
+                Marshal.FinalReleaseComObject(link);
             }
         }
 
-        internal static void CreateOrUpdateShortcut(string lnkPath, string targetPath, string args, string workDir, string iconLocation, string description)
+        private bool TryCreateShortcut(string lnkPath, string target, string args, string workDir, string iconFile, int iconIndex, string description, string label)
         {
-            Type shellType = Type.GetTypeFromProgID("WScript.Shell");
-            if (shellType == null) return;
-            object shell = Activator.CreateInstance(shellType);
-            object sc = shellType.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { lnkPath });
-            sc.GetType().InvokeMember("TargetPath", BindingFlags.SetProperty, null, sc, new object[] { targetPath });
-            sc.GetType().InvokeMember("Arguments", BindingFlags.SetProperty, null, sc, new object[] { args ?? "" });
-            sc.GetType().InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, sc, new object[] { workDir ?? "" });
-            if (!string.IsNullOrEmpty(iconLocation))
-                sc.GetType().InvokeMember("IconLocation", BindingFlags.SetProperty, null, sc, new object[] { iconLocation });
-            if (!string.IsNullOrEmpty(description))
-                sc.GetType().InvokeMember("Description", BindingFlags.SetProperty, null, sc, new object[] { description });
-            sc.GetType().InvokeMember("Save", BindingFlags.InvokeMethod, null, sc, null);
+            try
+            {
+                CreateOrUpdateShortcut(lnkPath, target, args, workDir, iconFile, iconIndex, description);
+                LogOk("Ярлик створено (" + label + "): " + lnkPath);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogWarn("Ярлик НЕ створено (" + label + "): " + RootCause(ex) + " — " + lnkPath);
+                return false;
+            }
         }
 
         public static void UninstallLauncherAndRestoreShortcuts(string gamePath, Action<string> logger)
@@ -1418,7 +1674,17 @@ namespace WotModpackInstaller
                 string wgcApi = Path.Combine(gamePath, "wgc_api.exe");
                 string ico = Path.Combine(gamePath, "game_metadata", "game.ico");
                 if (File.Exists(wgcApi))
-                    CreateOrUpdateShortcut(desktopLnk, wgcApi, "--open", gamePath, ico + ",0", "World of Tanks EU");
+                {
+                    try
+                    {
+                        CreateOrUpdateShortcut(desktopLnk, wgcApi, "--open", gamePath, ico, 0, "World of Tanks EU");
+                        logger("[Видалення] Відновлено оригінальний ярлик на робочому столі.");
+                    }
+                    catch (Exception ex)
+                    {
+                        logger("[Видалення] Не вдалося відновити ярлик на робочому столі: " + RootCause(ex));
+                    }
+                }
             }
 
             if (File.Exists(bkpStart))
@@ -1433,6 +1699,13 @@ namespace WotModpackInstaller
             {
                 File.Delete(modShortcut);
                 logger("[Видалення] Прибрано ярлик World of Tanks EU (модпак).lnk");
+            }
+
+            string startMenuModShortcut = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Microsoft\Windows\Start Menu\Programs\Wot Modpack\World of Tanks EU (модпак).lnk");
+            if (File.Exists(startMenuModShortcut))
+            {
+                File.Delete(startMenuModShortcut);
+                logger("[Видалення] Прибрано ярлик модпаку з меню Пуск.");
             }
 
             if (Directory.Exists(targetDir))
@@ -1524,11 +1797,12 @@ namespace WotModpackInstaller
             }
             catch (Exception ex)
             {
-                Log("[Оновлення] Помилка перевірки: " + ex.Message);
+                LogWarn("[Оновлення] Помилка перевірки: " + RootCause(ex));
             }
             finally
             {
                 prefetchDone.Set();
+                LogOk("[Оновлення] Перевірку оновлень завершено");
             }
         }
 
@@ -1550,7 +1824,7 @@ namespace WotModpackInstaller
                 Version newV = ParseVersion(Regex.Match(latest[0], rx).Groups[1].Value);
                 if (newV == null || (curV != null && newV <= curV))
                 {
-                    Log(string.Format("[Оновлення] {0} {1} - актуальна", src.id, curV));
+                    LogOk(string.Format("[Оновлення] {0} {1} — актуальна версія", src.id, curV));
                     return;
                 }
 
@@ -1559,7 +1833,7 @@ namespace WotModpackInstaller
                 if (!IsWotmodWithId(tmp, src.id))
                 {
                     File.Delete(tmp);
-                    Log("[Оновлення] " + src.id + ": завантажений файл пошкоджений, лишаю версію з архіву");
+                    LogWarn("[Оновлення] " + src.id + ": завантажений файл пошкоджений, лишаю версію з архіву");
                     return;
                 }
                 string target = Path.Combine(Path.GetDirectoryName(cur), latest[0]);
@@ -1567,11 +1841,11 @@ namespace WotModpackInstaller
                 File.Move(tmp, target);
                 File.Delete(cur);
                 if (mod.updates.Length == 1) mod.version = newV.ToString();
-                Log(string.Format("[Оновлення] {0}: {1} -> {2}", src.id, curV, newV));
+                LogOk(string.Format("[Оновлення] {0}: {1} -> {2}", src.id, curV, newV));
             }
             catch (Exception ex)
             {
-                Log("[Оновлення] " + src.id + ": не вдалося оновити (" + ex.Message + "), лишаю версію з архіву");
+                LogWarn("[Оновлення] " + src.id + ": не вдалося оновити (" + RootCause(ex) + "), лишаю версію з архіву");
             }
         }
 
@@ -1604,6 +1878,7 @@ namespace WotModpackInstaller
                 return;
 
             int removed = 0, restored = 0;
+            Log("Відкат: джерело " + bkp);
             try
             {
                 string manifest = Path.Combine(bkp, NewFilesManifest);
@@ -1626,14 +1901,14 @@ namespace WotModpackInstaller
                     File.Copy(f, dst, true);
                     restored++;
                 }
-                Log(string.Format("[Відкат] {0}: прибрано {1}, повернуто {2} файлів", Path.GetFileName(bkp), removed, restored));
+                LogOk(string.Format("Відкат {0}: прибрано файлів модпаку {1}, повернуто {2}", Path.GetFileName(bkp), removed, restored));
                 MessageBox.Show(string.Format("Відкат завершено.\nПрибрано файлів модпаку: {0}\nПовернуто файлів: {1}", removed, restored),
                     "Відкат", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
-                Log("[Відкат] Помилка: " + ex.Message);
-                MessageBox.Show("Помилка відкату: " + ex.Message, "Відкат", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                LogFail("Відкат: " + ex);
+                MessageBox.Show("Помилка відкату: " + RootCause(ex) + "\n\nДеталі — кнопка «Лог файл».", "Відкат", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -1727,6 +2002,45 @@ namespace WotModpackInstaller
             prgInstall.Value = Math.Min(100, Math.Max(0, value));
         }
 
+        private static readonly object logLock = new object();
+        private static string logFilePath;
+
+        internal static string LogFilePath
+        {
+            get
+            {
+                if (logFilePath == null)
+                {
+                    string dir = GetLauncherInstallDir();
+                    try
+                    {
+                        Directory.CreateDirectory(dir);
+                    }
+                    catch
+                    {
+                        dir = Path.GetTempPath();
+                    }
+                    logFilePath = Path.Combine(dir, "installer.log");
+                }
+                return logFilePath;
+            }
+        }
+
+        static MainForm()
+        {
+            try
+            {
+                string path = LogFilePath;
+                if (File.Exists(path) && new FileInfo(path).Length > 4L * 1024 * 1024)
+                {
+                    string old = path + ".old";
+                    if (File.Exists(old)) File.Delete(old);
+                    File.Move(path, old);
+                }
+            }
+            catch { }
+        }
+
         internal void Log(string msg)
         {
             if (this.InvokeRequired)
@@ -1734,7 +2048,53 @@ namespace WotModpackInstaller
                 this.Invoke(new Action<string>(Log), msg);
                 return;
             }
-            txtLog.AppendText(string.Format("[{0}] {1}\r\n", DateTime.Now.ToString("HH:mm:ss"), msg));
+            string line = string.Format("[{0}] {1}", DateTime.Now.ToString("HH:mm:ss"), msg);
+            txtLog.SelectionStart = txtLog.TextLength;
+            txtLog.SelectionLength = 0;
+            txtLog.SelectionColor = LogColor(msg);
+            txtLog.AppendText(line + "\r\n");
+            txtLog.SelectionStart = txtLog.TextLength;
+            txtLog.ScrollToCaret();
+            AppendToLogFile(line);
+        }
+
+        internal void LogOk(string msg) { Log("[ OK ] " + msg); }
+        internal void LogWarn(string msg) { Log("[WARN] " + msg); }
+        internal void LogFail(string msg) { Log("[FAIL] " + msg); }
+
+        private static Color LogColor(string msg)
+        {
+            if (msg.StartsWith("[ OK ]")) return Color.FromArgb(111, 207, 139);
+            if (msg.StartsWith("[WARN]")) return Color.FromArgb(229, 160, 40);
+            if (msg.StartsWith("[FAIL]")) return Color.FromArgb(224, 108, 108);
+            if (msg.StartsWith("===")) return Color.FromArgb(229, 160, 40);
+            return Color.FromArgb(143, 162, 191);
+        }
+
+        private static void AppendToLogFile(string line)
+        {
+            try
+            {
+                lock (logLock) File.AppendAllText(LogFilePath, line + "\r\n", new UTF8Encoding(true));
+            }
+            catch { }
+        }
+
+        private void OpenLogFile()
+        {
+            try
+            {
+                if (!File.Exists(LogFilePath))
+                {
+                    Log("Лог ще порожній.");
+                    return;
+                }
+                Process.Start("notepad.exe", "\"" + LogFilePath + "\"");
+            }
+            catch (Exception ex)
+            {
+                LogWarn("Не вдалося відкрити лог: " + RootCause(ex));
+            }
         }
 
         [STAThread]
@@ -1847,7 +2207,8 @@ namespace WotModpackInstaller
             string desktopDir = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
             string launcherExe = Path.Combine(MainForm.GetLauncherInstallDir(), "WotModLauncher.exe");
             string modpackLnk = Path.Combine(desktopDir, "World of Tanks EU (модпак).lnk");
-            if (File.Exists(launcherExe) || File.Exists(modpackLnk))
+            string startMenuModLnk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Microsoft\Windows\Start Menu\Programs\Wot Modpack\World of Tanks EU (модпак).lnk");
+            if (File.Exists(launcherExe) || File.Exists(modpackLnk) || File.Exists(startMenuModLnk))
                 items.Add(new UninstallItem { Display = "[Лаунчер] Автооновлення модів + відновлення оригінальних ярликів гри", IsLauncher = true });
 
             string verDir = Path.Combine(gamePath, "mods", gameVersion);

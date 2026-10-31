@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / 'scratch/background_fps'
 CONFIGS = ROOT / 'mods/configs/background_fps_limiter'
 PY27 = ROOT / 'py27_dist/python.exe'
-VERSION = '1.0.3'
+VERSION = '1.0.4'
 MOD_NAME = 'ua.background_fps_limiter_%s.wotmod' % VERSION
 
 

@@ -2,7 +2,7 @@
 
 This repository stores mod and launcher source. It does not contain the game client, Python runtime, private signing key, user configuration, logs or backups.
 
-Build inside a backed-up World of Tanks EU 2.4.1.0 installation with the game closed. `source-map.json` maps each repository file to its destination relative to the game root. Inspect and back up existing files before copying them. Preserve existing configuration files.
+Build inside a backed-up World of Tanks EU 2.4.1.1 installation with the game closed. `source-map.json` maps each repository file to its destination relative to the game root. Inspect and back up existing files before copying them. Preserve existing configuration files.
 
 Prerequisites: Python 3, a matching x64 Python 2.7 runtime with headers and import library in `py27_dist/`, Node.js, .NET Framework 4.x compiler, Visual Studio C++ x64 tools and Windows SDK. Install the released modpack first to supply framework packages and staging metadata. The packaging script uses a local Authenticode certificate; replace its certificate thumbprint with your own. No private certificate is distributed.
 

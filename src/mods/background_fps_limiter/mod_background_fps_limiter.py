@@ -13,13 +13,17 @@ _CONFIG_PATH = os.path.join(_CONFIG_DIR, 'config.json')
 _DEFAULT_CONFIG = {
     'enabled': True,
     'target_fps': 5,
+    'focused_fps': 240,
     'enable_in_hangar': True,
     'enable_in_battle': True
 }
 
-_TICK_INITIAL = 1.0
-_TICK_FOCUSED = 5.0
-_TICK_UNFOCUSED = 0.2
+_FOCUSED_FPS_DEFAULT = 240
+_FOCUSED_FPS_MIN = 30
+_FOCUSED_FPS_MAX = 240
+
+_TICK_INTERVAL = 1.0
+_WATCHDOG_INTERVAL = 3.0
 
 _CONFIG = dict(_DEFAULT_CONFIG)
 
@@ -89,10 +93,10 @@ def _ensure_packaged_file(mod_id, mod_version, member, target, accepted_sha256=N
 
 def _load_focus_probe():
     try:
-        _ensure_packaged_file('ua.background_fps_limiter', '1.0.3', 'res/ua_mod_payloads/background_fps_limiter/_ua_window_focus.pyd', os.path.join(_CONFIG_DIR, '_ua_window_focus.pyd'))
+        _ensure_packaged_file('ua.background_fps_limiter', '1.0.4', 'res/ua_mod_payloads/background_fps_limiter/_ua_window_focus.pyd', os.path.join(_CONFIG_DIR, '_ua_window_focus.pyd'))
         import imp
         probe = imp.load_dynamic('_ua_window_focus', os.path.join(_CONFIG_DIR, '_ua_window_focus.pyd'))
-        LOG_NOTE('[BackgroundFpsLimiter] Native foreground detection loaded version=1.0.3')
+        LOG_NOTE('[BackgroundFpsLimiter] Native foreground detection loaded version=1.0.4')
         return probe
     except Exception:
         LOG_NOTE('[BackgroundFpsLimiter] Native focus probe unavailable; minimize detection only')
@@ -103,11 +107,10 @@ def _load_focus_probe():
 _focus_probe = _load_focus_probe()
 
 _callback_id = None
+_watchdog_id = None
 _generation = 0
 _last_limit = None
-_last_apply_time = 0.0
-# wg_setReducedFpsMode during arena load may share cap state ∴ re-assert throttle every 5s. — 2026-10-24
-_REASSERT_INTERVAL = 5.0
+_applied_limit = None
 
 
 def _load_config():
@@ -147,9 +150,6 @@ def _is_window_focused():
 
 
 def _is_in_battle():
-
-
-
     try:
         player = BigWorld.player()
         if player is None or player.__class__.__name__ != 'PlayerAvatar':
@@ -163,32 +163,48 @@ def _is_in_battle():
         return True
 
 
-def _desired_limit():
-    if _CONFIG.get('enabled', True):
-        in_battle = _is_in_battle()
-        allowed = _CONFIG.get('enable_in_battle', True) if in_battle else _CONFIG.get('enable_in_hangar', True)
-        if allowed:
-            try:
-                target = int(_CONFIG.get('target_fps', 5))
-            except (TypeError, ValueError):
-                target = 5
-            return max(1, min(30, target))
-    return 0
+def _focused_limit():
+    try:
+        value = int(_CONFIG.get('focused_fps', _FOCUSED_FPS_DEFAULT))
+    except (TypeError, ValueError):
+        value = _FOCUSED_FPS_DEFAULT
+    return max(_FOCUSED_FPS_MIN, min(_FOCUSED_FPS_MAX, value))
 
 
-# Native scripts never call wg_setMaxFrameRate; 0 restores uncapped mode — 2026-10-27
+def _target_limit(focused):
+    if not _CONFIG.get('enabled', True):
+        return False, _focused_limit()
+    in_battle = _is_in_battle()
+    allowed = _CONFIG.get('enable_in_battle', True) if in_battle else _CONFIG.get('enable_in_hangar', True)
+    if not allowed:
+        return False, _focused_limit()
+    if focused:
+        return True, _focused_limit()
+    try:
+        target = int(_CONFIG.get('target_fps', 5))
+    except (TypeError, ValueError):
+        target = 5
+    return True, max(1, min(30, target))
+
+
 def _update_fps_limit(focused=None):
-
-    global _last_limit, _last_apply_time
+    global _last_limit, _applied_limit
     if focused is None:
         focused = _is_window_focused()
-    limit = 0 if focused else _desired_limit()
-    now = BigWorld.time()
-    reassert = limit > 0 and now - _last_apply_time >= _REASSERT_INTERVAL
-    if reassert or limit != _last_limit:
-        BigWorld.wg_setMaxFrameRate(limit)
+    active, limit = _target_limit(focused)
+    if not active:
+        if _applied_limit is not None:
+            # Leaving the cap behind: release once, then stop touching the engine at all — 2026-10-31
+            BigWorld.wg_setMaxFrameRate(limit)
+            _applied_limit = None
+            _last_limit = None
+            LOG_NOTE('[BackgroundFpsLimiter] Disabled for this context; cap released once')
+        return
+    # Applied every tick: client can drop its own cap back to a stale value between ticks — 2026-10-31
+    BigWorld.wg_setMaxFrameRate(limit)
+    _applied_limit = limit
+    if limit != _last_limit:
         _last_limit = limit
-        _last_apply_time = now
         LOG_NOTE('[BackgroundFpsLimiter] Frame rate limit -> %s' % ('off' if limit == 0 else '%d FPS' % limit))
 
 
@@ -210,7 +226,7 @@ def _schedule_tick(delay):
 
 
 def _check_focus_tick(gen):
-    global _callback_id, _last_limit
+    global _callback_id
     _callback_id = None
     if gen != _generation:
         return
@@ -218,22 +234,42 @@ def _check_focus_tick(gen):
     try:
         focused = _is_window_focused()
     except Exception:
-
         LOG_CURRENT_EXCEPTION()
     try:
         _update_fps_limit(focused)
     except Exception:
         LOG_CURRENT_EXCEPTION()
     try:
-        _schedule_tick(_TICK_FOCUSED if focused else _TICK_UNFOCUSED)
+        _schedule_tick(_TICK_INTERVAL)
     except Exception:
-
         LOG_CURRENT_EXCEPTION()
+
+
+def _cancel_watchdog():
+    global _watchdog_id
+    if _watchdog_id is not None:
         try:
-            BigWorld.wg_setMaxFrameRate(0)
-            _last_limit = None
+            BigWorld.cancelCallback(_watchdog_id)
         except Exception:
             pass
+        _watchdog_id = None
+
+
+def _watchdog_tick(gen):
+    global _watchdog_id
+    _watchdog_id = None
+    if gen != _generation:
+        return
+    if _callback_id is None:
+        LOG_NOTE('[BackgroundFpsLimiter] Focus tick lost; rearming')
+        try:
+            _schedule_tick(0.0)
+        except Exception:
+            LOG_CURRENT_EXCEPTION()
+    try:
+        _watchdog_id = BigWorld.callback(_WATCHDOG_INTERVAL, lambda: _watchdog_tick(gen))
+    except Exception:
+        LOG_CURRENT_EXCEPTION()
 
 
 def _on_settings_changed(linkage, new_settings):
@@ -244,6 +280,11 @@ def _on_settings_changed(linkage, new_settings):
     if 'target_fps' in new_settings:
         try:
             _CONFIG['target_fps'] = max(1, min(30, int(new_settings['target_fps'])))
+        except (TypeError, ValueError):
+            pass
+    if 'focused_fps' in new_settings:
+        try:
+            _CONFIG['focused_fps'] = max(_FOCUSED_FPS_MIN, min(_FOCUSED_FPS_MAX, int(new_settings['focused_fps'])))
         except (TypeError, ValueError):
             pass
     if 'enable_in_hangar' in new_settings:
@@ -268,7 +309,8 @@ def _init_mods_settings(gen):
             'enabled': bool(_CONFIG.get('enabled', True)),
             'column1': [
                 templates.createCheckbox(text='Увімкнути зниження FPS у фоні', varName='enabled', value=bool(_CONFIG.get('enabled', True))),
-                templates.createSlider(text='FPS у фоновому режимі', varName='target_fps', value=max(1, min(30, int(_CONFIG.get('target_fps', 5)))), min=1, max=30, interval=1, format='{{value}} FPS')
+                templates.createSlider(text='FPS у фоновому режимі', varName='target_fps', value=max(1, min(30, int(_CONFIG.get('target_fps', 5)))), min=1, max=30, interval=1, format='{{value}} FPS'),
+                templates.createSlider(text='FPS у фокусі', varName='focused_fps', value=_focused_limit(), min=_FOCUSED_FPS_MIN, max=_FOCUSED_FPS_MAX, interval=10, format='{{value}} FPS')
             ],
             'column2': [
                 templates.createCheckbox(text='Знижувати FPS в ангарі', varName='enable_in_hangar', value=bool(_CONFIG.get('enable_in_hangar', True))),
@@ -307,19 +349,23 @@ def _init_mods_settings(gen):
 
 
 def init():
+    global _watchdog_id
     _load_config()
     gen = _generation
     BigWorld.callback(0.1, lambda: _init_mods_settings(gen))
-    _schedule_tick(_TICK_INITIAL)
+    _schedule_tick(_TICK_INTERVAL)
+    _watchdog_id = BigWorld.callback(_WATCHDOG_INTERVAL, lambda: _watchdog_tick(gen))
     LOG_NOTE('[BackgroundFpsLimiter] Mod initialized successfully (focus backend: %s)' % ('win32-foreground' if _focus_probe is not None else 'isWindowVisible-fallback'))
 
 
 def fini():
-    global _generation, _last_limit
+    global _generation, _last_limit, _applied_limit
     _generation += 1
     _cancel_tick()
+    _cancel_watchdog()
     try:
-        BigWorld.wg_setMaxFrameRate(0)
+        BigWorld.wg_setMaxFrameRate(_focused_limit())
         _last_limit = None
+        _applied_limit = None
     except Exception:
         pass

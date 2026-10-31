@@ -15,7 +15,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / 'scratch/spectator_hud'
 PY27 = ROOT / 'py27_dist/python.exe'
-VERSION = '1.0.7'
+VERSION = '1.0.9'
 MOD_NAME = 'ua.spectator_teammate_hud_%s.wotmod' % VERSION
 ENTRY = 'res/scripts/client/gui/mods/mod_spectator_teammate_hud.pyc'
 STAGING = ROOT / 'staging_modpack/Mods/07_Spectator_Teammate_HUD'
@@ -49,7 +49,7 @@ def build():
     pyc = (SOURCE / 'mod_spectator_teammate_hud.pyc').read_bytes()
     assert struct.unpack('<H', pyc[:2])[0] == 62211
     temporary = SOURCE / (MOD_NAME + '.tmp')
-    meta = '<root><id>ua.spectator_teammate_hud</id><version>%s</version><name>Spectator Teammate HUD</name><description>Observed tank aim, penetration for known shells, received reload and equipment countdowns.</description></root>' % VERSION
+    meta = '<root><id>ua.spectator_teammate_hud</id><version>%s</version><name>Spectator+</name><description>Observed tank aim, penetration for known shells, received reload and equipment countdowns.</description></root>' % VERSION
     with zipfile.ZipFile(temporary, 'w', compression=zipfile.ZIP_STORED) as archive:
         archive.writestr('meta.xml', meta)
         archive.writestr(ENTRY, pyc)
