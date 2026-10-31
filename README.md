@@ -44,7 +44,7 @@
   "mods": [
     { "id": "ua.server_online_autoconnect", "title": "Smart Server",
       "version": "1.1.2", "file": "ua.server_online_autoconnect_1.1.2.wotmod",
-      "subdir": "", "url": ".../ua.server_online_autoconnect_1.1.1.wotmod",
+      "subdir": "", "url": ".../ua.server_online_autoconnect_1.1.2.wotmod",
       "sha256": "...", "size": 22265, "changes": "короткий опис змін" }
   ]
 }
