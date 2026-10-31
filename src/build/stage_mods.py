@@ -157,7 +157,7 @@ mods_def = [
         'id': 'openwg',
         'required': True,
         'title': 'OpenWG Core & Fixes',
-        'version': '2.8.3.0000',
+        'version': '1.9.0',
         'author': 'OpenWG Team',
         'description': 'Набір бібліотек OpenWG: виправлення відображення післябойових результатів, реплеїв та підтримка GameFace інтерфейсу.',
         'changes': 'Оновлення виправлень післябойових результатів, реплеїв та GameFace.',
@@ -168,8 +168,7 @@ mods_def = [
             'Пакет бібліотек OpenWG: виправлення кешу післябойових результатів, реплеїв та підтримка GameFace.'
         ],
         'files': [
-            (f'mods/{ver}/net.openwg/net.openwg.common_2.8.3.0000.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.common_2.8.3.0000.wotmod'),
-            (f'mods/{ver}/net.openwg/net.openwg.fix.battleresultscache_1.9.0.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.fix.battleresultscache_1.9.0.wotmod'),
+                        (f'mods/{ver}/net.openwg/net.openwg.fix.battleresultscache_1.9.0.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.fix.battleresultscache_1.9.0.wotmod'),
             (f'mods/{ver}/net.openwg/net.openwg.fix.battleresultsreplays_1.1.0.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.fix.battleresultsreplays_1.1.0.wotmod'),
             (f'mods/{ver}/net.openwg/net.openwg.gameface_1.2.2.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.gameface_1.2.2.wotmod')
         ],

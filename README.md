@@ -23,7 +23,7 @@
 | Velet Penetration | 1.0.2 |
 | ModsSettings API (Izeberg) | 1.7.1 |
 | ModsList API (Poliroid) | 1.8.0 |
-| OpenWG Core & Fixes (4 пакети) | 2.8.3.0000 / 1.9.0 / 1.1.0 / 1.2.2 |
+| OpenWG Core & Fixes (3 пакети) | 1.9.0 / 1.1.0 / 1.2.2 |
 | Spectator+ | 1.0.9 |
 | Background FPS Limiter | 1.0.4 |
 | Quick Research | 1.2.4 |
