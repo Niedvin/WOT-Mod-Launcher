@@ -81,8 +81,8 @@ print(f'Repacked {root_zip} ({os.path.getsize(root_zip) / (1024*1024):.2f} MB).'
 if '--workspace-only' not in sys.argv:
     desktop = os.path.expanduser('~\\Desktop')
     desktop_zip = os.path.join(desktop, 'WoT modpack by Niedvin.zip')
-    make_modpack_zip(desktop_zip)
-    print(f'Repacked {desktop_zip} ({os.path.getsize(desktop_zip) / (1024*1024):.2f} MB).')
+    if os.path.exists(desktop_zip):
+        os.remove(desktop_zip)
     desktop_dir = os.path.join(desktop, 'WoT modpack by Niedvin')
     if os.path.exists(desktop_dir):
         shutil.rmtree(desktop_dir)
