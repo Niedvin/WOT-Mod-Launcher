@@ -43,6 +43,10 @@ def calculate_dispersion_radius(dispersion_angle, distance):
     return max(0.0, float(distance) * float(dispersion_angle))
 
 
+def display_reload_seconds(remaining):
+    return math.ceil(max(0.0, float(remaining)) * 10.0) / 10.0
+
+
 def _get_vehicle_entity(veh_id):
     if BigWorld is None or veh_id is None:
         return None
@@ -73,6 +77,7 @@ class TeammateTracker(object):
     def __init__(self):
         self._reloads = {}
         self._unavailable_reloads = {}
+        self._reload_floors = {}
         self._equipments = {}
         self._equipment_snapshots = {}
         self._devices = {}
@@ -87,11 +92,19 @@ class TeammateTracker(object):
         if remaining < 0.0:
             self._reloads.pop(vehicle_id, None)
             self._unavailable_reloads[vehicle_id] = float(current_time)
+            self._reload_floors.pop(vehicle_id, None)
             return
         self._unavailable_reloads.pop(vehicle_id, None)
         if math.isnan(base) or math.isinf(base):
             base = remaining
-        self._reloads[vehicle_id] = (float(current_time), float(current_time) + remaining, max(base, remaining), clip_time, True)
+        end = float(current_time) + remaining
+        previous = self._reloads.get(vehicle_id)
+        if previous is None or end > previous[1] + 0.5:
+            self._reload_floors.pop(vehicle_id, None)
+        else:
+            # Server packets round timeLeft; keep the earlier end so the countdown never steps back — 2026-11-01
+            end = min(end, previous[1])
+        self._reloads[vehicle_id] = (float(current_time), end, max(base, remaining), clip_time, True)
 
     def record_shot(self, vehicle_id, current_time, base_reload, clip_time=None):
         base_reload = float(base_reload)
@@ -104,6 +117,7 @@ class TeammateTracker(object):
         if previous and previous[4] and previous[1] > current_time and current_time - previous[0] < 0.5:
             return
         self._unavailable_reloads.pop(vehicle_id, None)
+        self._reload_floors.pop(vehicle_id, None)
         self._reloads[vehicle_id] = (float(current_time), float(current_time) + base_reload, float(base_reload), clip_time, False)
 
     def record_equipment_used(self, vehicle_id, item_cd, current_time, cooldown):
@@ -178,6 +192,10 @@ class TeammateTracker(object):
             return (0.0, 0.0, False, None)
         received, end, base, clip_time, authoritative = record
         remaining = max(0.0, end - received - max(0.0, current_time - received))
+        floor = self._reload_floors.get(vehicle_id)
+        if floor is not None and remaining > floor:
+            remaining = floor
+        self._reload_floors[vehicle_id] = remaining
         return (remaining, base, remaining > 0.0, clip_time)
 
     def has_reload(self, vehicle_id):
@@ -197,6 +215,7 @@ class TeammateTracker(object):
     def clear(self):
         self._reloads.clear()
         self._unavailable_reloads.clear()
+        self._reload_floors.clear()
         self._equipments.clear()
         self._equipment_snapshots.clear()
         self._devices.clear()
@@ -403,18 +422,17 @@ class SpectatorHudAdapter(object):
         self._equipment_signature = None
         self._equipment_state = {}
         self._consumables_layout = None
-        self._consumables_position = None
-        self._consumables_stale = False
-
-    def _invalidate_consumables_position(self):
-        # Rebuild changes the row width on the next frame, so reposition only after it lands — 2026-10-31
-        self._consumables_stale = True
-        self._consumables_position = None
+        self._consumables_stage = None
+        self._consumables_padding = None
+        self._consumables_bottom = 48.0
+        self._consumables_defer = False
 
     def _restore_consumables_layout(self):
         layout = self._consumables_layout
         self._consumables_layout = None
-        self._consumables_position = None
+        self._consumables_stage = None
+        self._consumables_padding = None
+        self._consumables_defer = False
         if layout is not None:
             panel, clip, damage, native_size = layout
             if getattr(panel, 'flashObject', None) is clip:
@@ -431,61 +449,107 @@ class SpectatorHudAdapter(object):
                 return fallback
             raise
 
-    def _position_applied(self, clip, target_x, target_y):
-        applied = self._consumables_position
-        if applied is None or applied[0] is not clip:
-            return False
-        if abs(float(applied[1]) - target_x) >= 0.5 or abs(float(applied[2]) - target_y) >= 0.5:
-            return False
+    @staticmethod
+    def _place(clip, target_x, target_y):
         try:
-            return abs(float(clip.x) - target_x) < 0.5 and abs(float(clip.y) - target_y) < 0.5
+            if abs(float(clip.x) - target_x) < 0.5 and abs(float(clip.y) - target_y) < 0.5:
+                return
         except Exception:
-            return False
+            pass
+        clip.x = target_x
+        clip.y = target_y
+
+    def _row_bottom(self, clip):
+        bottom = None
+        for index in range(15):
+            renderer = clip.getRendererBySlotIdx(index)
+            if renderer is None or not renderer.visible:
+                continue
+            anchor = getattr(renderer, 'hit', None) or getattr(renderer, 'iconLoader', None)
+            if anchor is None:
+                continue
+            # Hidden glow clips inflate renderer bounds beyond visible buttons. — 2026-10-28
+            try:
+                bounds = anchor.getBounds(clip)
+            except Exception:
+                continue
+            if float(bounds.width) > 0 and float(bounds.height) > 0:
+                value = float(bounds.y) + float(bounds.height)
+                if bottom is None or value > bottom:
+                    bottom = value
+        if bottom is not None:
+            self._consumables_bottom = bottom
+        return self._consumables_bottom
+
+    def _stage_padding(self, clip):
+        if self._consumables_padding is None:
+            # Bottom padding differs per mode (58 stock, 86 Halloween), so measure it before resizing — 2026-10-31
+            try:
+                padding = float(clip.stage.stageHeight) - float(clip.y)
+            except Exception:
+                return 58.0
+            if 0.0 < padding < 200.0:
+                self._consumables_padding = padding
+            else:
+                return 58.0
+        return self._consumables_padding
+
+    @staticmethod
+    def _reset_equipment_slots(panel):
+        start = getattr(panel, '_HW_EQUIPMENT_START_IDX', None)
+        end = getattr(panel, '_HW_EQUIPMENT_END_IDX', None)
+        slots = []
+        if start is not None and end is not None and getattr(panel, '_cds', None) is not None:
+            # Event abilities are booked in 3..5, which _resetEquipments leaves untouched — 2026-10-31
+            slots = [index for index in range(start, end + 1) if index < len(panel._cds)]
+            mask = 0
+            for index in slots:
+                panel._cds[index] = None
+                mask |= 1 << index
+            if hasattr(panel, '_mask'):
+                panel._mask &= ~mask
+            if slots and hasattr(panel, 'as_resetPassiveAbilitiesS'):
+                panel.as_resetPassiveAbilitiesS(slots)
+            if slots and hasattr(panel, 'as_resetS'):
+                panel.as_resetS(slots)
+        if hasattr(panel, '_resetEquipments'):
+            panel._resetEquipments()
+        else:
+            panel._reset()
 
     def shift_consumables_left(self, panel, damage_panel):
         clip = getattr(panel, 'flashObject', None)
         damage = getattr(damage_panel, 'flashObject', None)
         if clip is None or damage is None:
             return
-        if self._consumables_stale:
-            # Row was just rebuilt; its native width lands next frame, so position it then — 2026-10-31
-            self._consumables_stale = False
-            return
         layout = self._consumables_layout
         if layout is not None and layout[1] is not clip:
             self._restore_consumables_layout()
-        rectangles = []
-        for index in range(15):
-            renderer = clip.getRendererBySlotIdx(index)
-            if renderer is not None and renderer.visible:
-                anchor = getattr(renderer, 'hit', None) or getattr(renderer, 'iconLoader', None)
-                if anchor is None:
-                    continue
-                # Hidden glow clips inflate renderer bounds beyond visible buttons. — 2026-10-28
-                bounds = anchor.getBounds(clip)
-                if float(bounds.width) > 0 and float(bounds.height) > 0:
-                    rectangles.append(bounds)
-        if not rectangles:
-            return
         native_size = self._native_stage_size(clip, damage)
-        left = min(float(bounds.x) for bounds in rectangles)
-        bottom = max(float(bounds.y) + float(bounds.height) for bounds in rectangles)
+        padding = self._stage_padding(clip)
         # DamagePanel reserves 230 px independently of animated child bounds in WoT 2.4.1.0 — 2026-10-27
-        target_x = float(damage.x) + 230.0 + 12.0 - left
-        target_y = native_size[1] - 4.0 - bottom
-        # updateStage per tick re-runs updatePosition and makes the whole row blink — 2026-10-28
-        if self._position_applied(clip, target_x, target_y):
+        target_x = float(damage.x) + 230.0 + 12.0
+        target_y = native_size[1] - 4.0 - self._row_bottom(clip)
+        # Native redraws re-center the clip from the stage size, so place the row on every tick — 2026-10-31
+        self._place(clip, target_x, target_y)
+        if self._consumables_defer:
+            # Rebuilt row gets its final width on the next frame; resize the stage then, but never skip the placement — 2026-10-31
+            self._consumables_defer = False
             self._consumables_layout = (panel, clip, damage, native_size)
             return
-        clip.updateStage(2.0 * target_x + float(clip.basePanelWidth), target_y + 58.0)
-        clip.x = target_x
-        clip.y = target_y
+        stage_width = 2.0 * target_x + float(clip.basePanelWidth)
+        stage_height = target_y + padding
+        applied = self._consumables_stage
+        if applied is not None and applied[0] is clip and abs(applied[1] - stage_width) < 0.5 and abs(applied[2] - stage_height) < 0.5:
+            self._consumables_layout = (panel, clip, damage, native_size)
+            return
+        # updateStage per tick re-runs updatePosition and makes the whole row blink — 2026-10-28
+        clip.updateStage(stage_width, stage_height)
+        self._consumables_stage = (clip, stage_width, stage_height)
         self._consumables_layout = (panel, clip, damage, native_size)
-        self._consumables_position = (clip, target_x, target_y)
 
     def reset(self):
         self._restore_consumables_layout()
-        self._consumables_stale = False
         for item in self._equipment_items.values():
             if hasattr(item, 'clear'):
                 item.clear()
@@ -558,11 +622,9 @@ class SpectatorHudAdapter(object):
             self._equipment_state.clear()
             self._equipment_key = key
             self._equipment_signature = signature
-            if hasattr(panel, '_resetEquipments'):
-                panel._resetEquipments()
-            else:
-                panel._reset()
-            self._invalidate_consumables_position()
+            self._reset_equipment_slots(panel)
+            # The rebuilt row reports its final width on the next frame, so resize the stage after it — 2026-10-31
+            self._consumables_defer = True
         if not signature:
             return
         import constants
@@ -616,8 +678,6 @@ class SpectatorHudAdapter(object):
         if touched and hasattr(panel, 'as_showEquipmentSlotsS'):
             # An empty slot hides the whole row; re-show it after the replay re-adds real slots. — 2026-10-28
             panel.as_showEquipmentSlotsS(True)
-        if touched:
-            self._invalidate_consumables_position()
 
     bind_consumables_panel = bind_consumables_cooldowns
 
@@ -625,10 +685,10 @@ class SpectatorHudAdapter(object):
         if page is not None and hasattr(page, '_setComponentsVisibility'):
             page._setComponentsVisibility(visible={'consumablesPanel', 'damagePanel'}, hidden=set())
 
-
 class SpectatorReloadDisplay(object):
     def __init__(self):
         self._text = None
+        self._value = None
 
     def update(self, vehicle_id, tracker, current_time, show_reload=True, show_equipment_unknown=False, show_shell_unknown=False):
         text = []
@@ -636,7 +696,7 @@ class SpectatorReloadDisplay(object):
             if not tracker.has_reload(vehicle_id):
                 text.append(u'Перезарядка: немає даних')
             else:
-                remaining = tracker.get_actual_reload(vehicle_id, current_time)[0]
+                remaining = display_reload_seconds(tracker.get_actual_reload(vehicle_id, current_time)[0])
                 estimated = tracker.is_reload_estimated(vehicle_id)
                 if remaining > 0.0:
                     text.append(u'Перезарядка: %s%.1f с' % (u'≈' if estimated else u'', remaining))
@@ -649,6 +709,9 @@ class SpectatorReloadDisplay(object):
         if not text:
             self.clear()
             return
+        value = u'\n'.join(text)
+        if value == self._value:
+            return
         import GUI
         if self._text is None:
             component = GUI.Text(u'')
@@ -660,13 +723,15 @@ class SpectatorReloadDisplay(object):
             component.multiline = True
             GUI.addRoot(component)
             self._text = component
-        self._text.text = u'\n'.join(text)
+        self._text.text = value
+        self._value = value
 
     def clear(self):
         if self._text is not None:
             import GUI
             GUI.delRoot(self._text)
             self._text = None
+        self._value = None
 
 
 _logged_errors = set()
@@ -730,6 +795,7 @@ _active_battle_page = None
 _last_hud_update_time = 0.0
 _ammo_plugin = None
 _ammo_render_key = None
+_reload_render_key = None
 _plugin_hooks = []
 _crew_buff_status_id = None
 
@@ -791,14 +857,23 @@ def _spectator_shot_result(marker, exclude_team, multiplier):
 
 
 def _render_spectator_reload(plugin):
+    global _reload_render_key
     parent = plugin._parentObj
     vehicle_id = _aim_manager._current_vehicle_id
     now = BigWorld.serverTime()
     remaining, base, reloading, clip = _tracker.get_actual_reload(vehicle_id, now)
     known = _tracker.has_reload(vehicle_id) and not _tracker.is_reload_estimated(vehicle_id) and _CONFIG.get('show_actual_reload', True)
     if not known:
-        remaining, base, reloading = -1.0, 0.0, False
-    parent.as_setReloadingS(remaining, base, 0.0, reloading, False)
+        frame = (vehicle_id, -1.0, 0.0, 0.0, False)
+    else:
+        actual = display_reload_seconds(remaining)
+        if base > 0.0:
+            actual = min(actual, base)
+        frame = (vehicle_id, actual, base, max(0.0, base - actual), bool(reloading))
+    if frame == _reload_render_key:
+        return
+    _reload_render_key = frame
+    parent.as_setReloadingS(frame[1], frame[2], frame[3], frame[4], False)
 
 
 def _render_spectator_ammo(plugin):
@@ -1028,8 +1103,9 @@ def _on_spectate_vehicle(vehicle_id):
         _run_hud_step('vehicle marker reset', _crosshair_adapter.clear)
         _run_hud_step('vehicle panels reset', _hud_adapter.reset)
         _run_hud_step('vehicle reload reset', _reload_display.clear)
-        global _ammo_render_key, _last_hud_update_time
+        global _ammo_render_key, _reload_render_key, _last_hud_update_time
         _ammo_render_key = None
+        _reload_render_key = None
         _last_hud_update_time = 0.0
         page = _active_battle_page() if _active_battle_page is not None else None
         panel = page.getComponent('consumablesPanel') if page is not None else None
@@ -1045,8 +1121,9 @@ def _on_spectate_vehicle(vehicle_id):
 
 
 def _on_spectate_stop():
-    global _ammo_render_key
+    global _ammo_render_key, _reload_render_key
     _ammo_render_key = None
+    _reload_render_key = None
     was_active = _aim_manager.is_active()
     _stop_aim_ticker()
     _aim_manager.disable()
@@ -1418,7 +1495,7 @@ def init():
 
     try:
         from debug_utils import LOG_NOTE
-        LOG_NOTE('[SpectatorHUD] 1.0.9 initialized')
+        LOG_NOTE('[SpectatorHUD] 1.0.10 initialized')
     except Exception:
         pass
 

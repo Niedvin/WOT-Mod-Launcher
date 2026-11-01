@@ -162,13 +162,13 @@ mods_def = [
         'description': 'Набір бібліотек OpenWG: виправлення відображення післябойових результатів, реплеїв та підтримка GameFace інтерфейсу.',
         'changes': 'Оновлення виправлень післябойових результатів, реплеїв та GameFace.',
         'default_checked': True,
-        'clean_patterns': ['net.openwg/*.wotmod'],
+        'clean_patterns': ['net.openwg/net.openwg.fix.*.wotmod', 'net.openwg/net.openwg.gameface_*.wotmod'],
         'clean_res_mods': [],
         'readme_features': [
             'Пакет бібліотек OpenWG: виправлення кешу післябойових результатів, реплеїв та підтримка GameFace.'
         ],
         'files': [
-                        (f'mods/{ver}/net.openwg/net.openwg.fix.battleresultscache_1.9.0.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.fix.battleresultscache_1.9.0.wotmod'),
+            (f'mods/{ver}/net.openwg/net.openwg.fix.battleresultscache_1.9.0.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.fix.battleresultscache_1.9.0.wotmod'),
             (f'mods/{ver}/net.openwg/net.openwg.fix.battleresultsreplays_1.1.0.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.fix.battleresultsreplays_1.1.0.wotmod'),
             (f'mods/{ver}/net.openwg/net.openwg.gameface_1.2.2.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.gameface_1.2.2.wotmod')
         ],
@@ -179,13 +179,43 @@ mods_def = [
         ]
     },
     {
+        'folder': '10_OpenWG_GPU',
+        'id': 'openwg_gpu',
+        'title': 'GPU Boost (Anti-Lag + XeSS)',
+        'version': '2.8.3.0000',
+        'author': 'OpenWG Team',
+        'description': 'OpenWG GPU: AMD Radeon Anti-Lag 2 для меншої затримки вводу та Intel XeSS для апскейлу. NVIDIA Reflex, DLSS, FSR та нейрорендеринг вимкнені у налаштуваннях за замовчуванням. Мод вбудовується в рендер клієнта (нативні DLL), тому використовуйте на власний ризик.',
+        'changes': 'Додано OpenWG Common 2.8.3 з Anti-Lag 2 та апскейлером XeSS.',
+        'default_checked': True,
+        'clean_patterns': ['net.openwg/net.openwg.common_*.wotmod', 'net.openwg/net.openwg.gpu.*.wotmod'],
+        'clean_res_mods': [],
+        'readme_features': [
+            'AMD Radeon Anti-Lag 2 (працює лише на відеокартах Radeon).',
+            'Intel XeSS Super Resolution (якість обирається у налаштуваннях гри).',
+            'NVIDIA Reflex, DLSS, FSR та нейрорендеринг вимкнені за замовчуванням.',
+            'Оновлення бібліотек перевіряється інсталятором на GitLab OpenWG.'
+        ],
+        'files': [
+            (f'mods/{ver}/net.openwg/net.openwg.common_2.8.3.0000.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.common_2.8.3.0000.wotmod'),
+            (f'mods/{ver}/net.openwg/net.openwg.gpu.upscaler_2.8.3.0000.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.gpu.upscaler_2.8.3.0000.wotmod'),
+            (f'mods/{ver}/net.openwg/net.openwg.gpu.upscaler.xess_2.8.3.0000.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.gpu.upscaler.xess_2.8.3.0000.wotmod'),
+            ('scratch/openwg_gpu_cfg/gpu.json', 'game_files/mods/configs/net.openwg.wot.common/gpu.json'),
+            ('scratch/openwg_gpu_cfg/upscaler.json', 'game_files/mods/configs/net.openwg.gpu.upscaler/config.json')
+        ],
+        'updates': [
+            {'id': 'net.openwg.common', 'kind': 'openwg_zip', 'repo': 'openwg/wot.common'},
+            {'id': 'net.openwg.gpu.upscaler', 'kind': 'openwg_zip', 'repo': 'openwg/wot.common'},
+            {'id': 'net.openwg.gpu.upscaler.xess', 'kind': 'openwg_zip', 'repo': 'openwg/wot.common'}
+        ]
+    },
+    {
         'folder': '07_Spectator_Teammate_HUD',
         'id': 'spectator_teammate_hud',
         'title': 'Spectator+',
-        'version': '1.0.9',
+        'version': '1.0.11',
         'author': 'Niedvin',
         'description': 'Відображає приціл у реальному часі, таймер перезарядки, стан модулів і екіпажу, а також таймери перезарядки спорядження союзника, за яким ви спостерігаєте після знищення вашого танка.',
-        'changes': 'Нова назва: Spectator+. Функціонал без змін.',
+        'changes': 'Таймер перезарядки більше не смикається назад під час спостереження.',
         'default_checked': True,
         'clean_patterns': ['ua.spectator_teammate_hud*.wotmod'],
         'clean_res_mods': [],
@@ -197,7 +227,7 @@ mods_def = [
             'Повна відсутність фонового навантаження на FPS під час живого бою.'
         ],
         'files': [
-            (get_src_wotmod('ua.spectator_teammate_hud_1.0.9.wotmod'), 'game_files/mods/_VERSION_/ua.spectator_teammate_hud_1.0.9.wotmod'),
+            (get_src_wotmod('ua.spectator_teammate_hud_1.0.11.wotmod'), 'game_files/mods/_VERSION_/ua.spectator_teammate_hud_1.0.11.wotmod'),
             ('mods/configs/spectator_teammate_hud/config.json', 'game_files/mods/configs/spectator_teammate_hud/config.json')
         ]
     },

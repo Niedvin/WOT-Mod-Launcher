@@ -26,6 +26,8 @@
     "src/mods/platoon_autostart/mod_platoon_autostart.py": "mods/configs/platoon_autostart/mod_platoon_autostart.py",
     "src/mods/armor_flashlight/mod_armor_flashlight_brightness.py": "mods/configs/armor_flashlight/mod_armor_flashlight_brightness.py",
     "src/mods/platoon_autostart/MembersWindow.css": "scratch/platoon_ui_edit/MembersWindow.css",
-    "src/mods/platoon_autostart/MembersWindow.js": "scratch/platoon_ui_edit/MembersWindow.js"
+    "src/mods/platoon_autostart/MembersWindow.js": "scratch/platoon_ui_edit/MembersWindow.js",
+    "src/mods/openwg_gpu/gpu.json": "scratch/openwg_gpu_cfg/gpu.json",
+    "src/mods/openwg_gpu/upscaler.json": "scratch/openwg_gpu_cfg/upscaler.json"
   }
 }

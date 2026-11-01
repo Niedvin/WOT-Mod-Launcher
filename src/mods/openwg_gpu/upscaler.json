@@ -1,0 +1,26 @@
+{
+    "version": 1,
+    "enabled": true,
+    "ui": {
+        "enabled": true
+    },
+    "overlay": {
+        "enabled": false
+    },
+    "neural_rendering": {
+        "enabled": false,
+        "preset": 1,
+        "style": 0,
+        "passes": 1,
+        "intensity": 1.0,
+        "local_tone": 1.0,
+        "local_structure": 1.0,
+        "skin_structure": 1.0,
+        "auto_mask": false
+    },
+    "upscaler": {
+        "enabled": true,
+        "technology": "xess",
+        "quality": "quality"
+    }
+}

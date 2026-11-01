@@ -1,0 +1,19 @@
+{
+    "version": 3,
+    "ui": {
+        "enabled": true
+    },
+    "anti_lag_2": {
+        "enabled": true
+    },
+    "nvidia_reflex": {
+        "enabled": false,
+        "boost": false
+    },
+    "framelimiter": {
+        "max_fps": 0,
+        "hangar_max_fps": 60,
+        "algorithm": "default",
+        "inactive_window_max_fps": 5
+    }
+}

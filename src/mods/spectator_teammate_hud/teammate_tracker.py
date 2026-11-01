@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from __future__ import division
 from collections import OrderedDict
 import math
@@ -7,6 +8,7 @@ class TeammateTracker(object):
     def __init__(self):
         self._reloads = {}
         self._unavailable_reloads = {}
+        self._reload_floors = {}
         self._equipments = {}
         self._equipment_snapshots = {}
         self._devices = {}
@@ -21,11 +23,19 @@ class TeammateTracker(object):
         if remaining < 0.0:
             self._reloads.pop(vehicle_id, None)
             self._unavailable_reloads[vehicle_id] = float(current_time)
+            self._reload_floors.pop(vehicle_id, None)
             return
         self._unavailable_reloads.pop(vehicle_id, None)
         if math.isnan(base) or math.isinf(base):
             base = remaining
-        self._reloads[vehicle_id] = (float(current_time), float(current_time) + remaining, max(base, remaining), clip_time, True)
+        end = float(current_time) + remaining
+        previous = self._reloads.get(vehicle_id)
+        if previous is None or end > previous[1] + 0.5:
+            self._reload_floors.pop(vehicle_id, None)
+        else:
+            # Server packets round timeLeft; keep the earlier end so the countdown never steps back — 2026-11-01
+            end = min(end, previous[1])
+        self._reloads[vehicle_id] = (float(current_time), end, max(base, remaining), clip_time, True)
 
     def record_shot(self, vehicle_id, current_time, base_reload, clip_time=None):
         base_reload = float(base_reload)
@@ -38,6 +48,7 @@ class TeammateTracker(object):
         if previous and previous[4] and previous[1] > current_time and current_time - previous[0] < 0.5:
             return
         self._unavailable_reloads.pop(vehicle_id, None)
+        self._reload_floors.pop(vehicle_id, None)
         self._reloads[vehicle_id] = (float(current_time), float(current_time) + base_reload, float(base_reload), clip_time, False)
 
     def record_equipment_used(self, vehicle_id, item_cd, current_time, cooldown):
@@ -112,6 +123,10 @@ class TeammateTracker(object):
             return (0.0, 0.0, False, None)
         received, end, base, clip_time, authoritative = record
         remaining = max(0.0, end - received - max(0.0, current_time - received))
+        floor = self._reload_floors.get(vehicle_id)
+        if floor is not None and remaining > floor:
+            remaining = floor
+        self._reload_floors[vehicle_id] = remaining
         return (remaining, base, remaining > 0.0, clip_time)
 
     def has_reload(self, vehicle_id):
@@ -131,6 +146,7 @@ class TeammateTracker(object):
     def clear(self):
         self._reloads.clear()
         self._unavailable_reloads.clear()
+        self._reload_floors.clear()
         self._equipments.clear()
         self._equipment_snapshots.clear()
         self._devices.clear()
