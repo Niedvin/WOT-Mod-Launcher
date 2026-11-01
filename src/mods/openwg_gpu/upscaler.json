@@ -21,6 +21,7 @@
     "upscaler": {
         "enabled": true,
         "technology": "xess",
-        "quality": "quality"
+        "quality": "quality",
+        "sharpness": 0.2
     }
 }
