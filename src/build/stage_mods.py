@@ -271,8 +271,8 @@ mods_def = [
             (f'mods/{ver}/net.openwg/net.openwg.common_2.8.3.0000.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.common_2.8.3.0000.wotmod'),
             (f'mods/{ver}/net.openwg/net.openwg.gpu.upscaler_2.8.3.0000.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.gpu.upscaler_2.8.3.0000.wotmod'),
             (f'mods/{ver}/net.openwg/net.openwg.gpu.upscaler.xess_2.8.3.0000.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.gpu.upscaler.xess_2.8.3.0000.wotmod'),
-            ('scratch/openwg_gpu_cfg/gpu.json', 'game_files/mods/configs/net.openwg.wot.common/gpu.json'),
-            ('scratch/openwg_gpu_cfg/upscaler.json', 'game_files/mods/configs/net.openwg.gpu.upscaler/config.json')
+            (src_first('src/mods/openwg_gpu/gpu.json', 'scratch/openwg_gpu_cfg/gpu.json'), 'game_files/mods/configs/net.openwg.wot.common/gpu.json'),
+            (src_first('src/mods/openwg_gpu/upscaler.json', 'scratch/openwg_gpu_cfg/upscaler.json'), 'game_files/mods/configs/net.openwg.gpu.upscaler/config.json')
         ],
         'updates': [
             {'id': 'net.openwg.common', 'kind': 'openwg_zip', 'repo': 'openwg/wot.common'},
