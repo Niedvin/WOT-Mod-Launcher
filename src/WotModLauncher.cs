@@ -13,6 +13,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
@@ -121,11 +122,15 @@ namespace WotModLauncher
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WotModpack"); }
         }
 
+        private const int ManifestTimeoutMs = 4000;
+
         [STAThread]
         public static int Main(string[] args)
         {
             // .NET 4.0 defaults to TLS 1.0 which GitHub drops — 2026-10-24
             ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
+            // Mod packages download in parallel; .NET Framework allows only 2 connections per host by default
+            ServicePointManager.DefaultConnectionLimit = Math.Max(ServicePointManager.DefaultConnectionLimit, 8);
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
@@ -148,13 +153,21 @@ namespace WotModLauncher
             LauncherConfig cfg = LoadConfig(argGamePath);
             if (cfg == null || string.IsNullOrEmpty(cfg.game_path) || !Directory.Exists(cfg.game_path))
             {
-                if (!checkOnly && !updateOnly && !string.IsNullOrEmpty(argGamePath))
-                    LaunchGame(argGamePath);
+                // The standard game shortcuts point here, so a silent exit would leave the user with a dead shortcut
+                if (!checkOnly && !updateOnly)
+                {
+                    MessageBox.Show(
+                        "Не вдалося знайти папку World of Tanks.\nЗапустіть інсталятор модпаку ще раз і вкажіть шлях до гри.",
+                        "WoT Modpack Launcher", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
                 return 1;
             }
 
             if (string.IsNullOrEmpty(ManifestOverride) && !string.IsNullOrEmpty(cfg.manifest_url))
                 ManifestOverride = cfg.manifest_url;
+
+            // The manifest request runs while shortcuts and version folders are checked locally
+            ManifestFetch fetch = ManifestFetch.Start(ManifestTimeoutMs);
 
             if (cfg.hijack_shortcuts)
                 EnsureShortcutsRedirected(cfg.game_path);
@@ -163,11 +176,9 @@ namespace WotModLauncher
             if (!string.IsNullOrEmpty(gameVer))
                 SyncVersionFolderIfEmpty(cfg.game_path, gameVer);
 
-            ManifestRoot manifest = FetchManifestWithTimeout(4000);
+            ManifestRoot manifest = fetch.Wait();
             if (manifest != null)
             {
-                if (!checkOnly)
-                    TryStageSelfUpdate(manifest.launcher);
                 List<PendingModUpdate> updates = FindPendingUpdates(cfg.game_path, gameVer, manifest);
                 if (updates.Count > 0 && !checkOnly)
                 {
@@ -181,7 +192,33 @@ namespace WotModLauncher
             if (!checkOnly && !updateOnly)
                 LaunchGame(cfg.game_path);
 
+            // Launcher self-update runs after the game is started so it never delays the launch
+            if (manifest != null && !checkOnly)
+                TryStageSelfUpdate(manifest.launcher);
+
             return 0;
+        }
+
+        private sealed class ManifestFetch
+        {
+            private Thread thread;
+            private ManifestRoot result;
+            private int timeoutMs;
+
+            public static ManifestFetch Start(int timeoutMs)
+            {
+                var fetch = new ManifestFetch { timeoutMs = timeoutMs };
+                fetch.thread = new Thread(() => { fetch.result = FetchManifestWithTimeout(timeoutMs); });
+                fetch.thread.IsBackground = true;
+                fetch.thread.Start();
+                return fetch;
+            }
+
+            public ManifestRoot Wait()
+            {
+                // HttpWebRequest.Timeout does not cover DNS or proxy discovery, so the wait is capped here
+                return thread.Join(timeoutMs + 2000) ? result : null;
+            }
         }
 
         private static void CleanupSelfUpdateOldBinary()
@@ -197,12 +234,33 @@ namespace WotModLauncher
 
         private static bool IsGameAlreadyRunning()
         {
-            try
-            {
-                return Process.GetProcessesByName("WorldOfTanks").Length > 0
-                    || Process.GetProcessesByName("WorldOfTanks32").Length > 0;
-            }
+            // One process snapshot instead of one per name; every Process object is disposed
+            Process[] all;
+            try { all = Process.GetProcesses(); }
             catch { return false; }
+            bool found = false;
+            foreach (Process p in all)
+            {
+                try
+                {
+                    if (!found)
+                    {
+                        string name = p.ProcessName;
+                        found = string.Equals(name, "WorldOfTanks", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(name, "WorldOfTanks32", StringComparison.OrdinalIgnoreCase);
+                    }
+                }
+                catch { }
+                finally { p.Dispose(); }
+            }
+            return found;
+        }
+
+        private static bool IsGameDir(string dir)
+        {
+            return !string.IsNullOrEmpty(dir)
+                && File.Exists(Path.Combine(dir, "WorldOfTanks.exe"))
+                && File.Exists(Path.Combine(dir, "version.xml"));
         }
 
         private static LauncherConfig LoadConfig(string overrideGamePath)
@@ -225,8 +283,14 @@ namespace WotModLauncher
             if (string.IsNullOrEmpty(cfg.game_path) || !Directory.Exists(cfg.game_path))
             {
                 string baseDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/');
-                if (File.Exists(Path.Combine(baseDir, "WorldOfTanks.exe")) && File.Exists(Path.Combine(baseDir, "version.xml")))
+                string workDir = null;
+                try { workDir = Environment.CurrentDirectory.TrimEnd('\\', '/'); }
+                catch { }
+                // Redirected shortcuts start the launcher with the game folder as working directory
+                if (IsGameDir(baseDir))
                     cfg.game_path = baseDir;
+                else if (IsGameDir(workDir))
+                    cfg.game_path = workDir;
             }
             return cfg;
         }
@@ -336,7 +400,8 @@ namespace WotModLauncher
 
             try
             {
-                HttpWebRequest req = (HttpWebRequest)WebRequest.Create(target + "?t=" + Environment.TickCount);
+                string separator = target.IndexOf('?') >= 0 ? "&" : "?";
+                HttpWebRequest req = (HttpWebRequest)WebRequest.Create(target + separator + "t=" + Environment.TickCount);
                 req.UserAgent = "WotModLauncher/" + LauncherVersion;
                 req.Timeout = timeoutMs;
                 req.ReadWriteTimeout = timeoutMs;
@@ -358,8 +423,10 @@ namespace WotModLauncher
 
         private static void TryStageSelfUpdate(ManifestLauncherInfo info)
         {
-            if (info == null || string.IsNullOrEmpty(info.version) || string.IsNullOrEmpty(info.url))
+            // An unverified executable is never swapped in
+            if (info == null || string.IsNullOrEmpty(info.version) || string.IsNullOrEmpty(info.url) || string.IsNullOrEmpty(info.sha256))
                 return;
+            string tmp = null;
             try
             {
                 Version curV = ParseVer(LauncherVersion);
@@ -367,7 +434,7 @@ namespace WotModLauncher
                 if (curV == null || remV == null || remV <= curV) return;
 
                 string exe = Assembly.GetExecutingAssembly().Location;
-                string tmp = exe + ".new";
+                tmp = exe + ".new";
                 string localSrc = ResolveLocalUrl(info.url);
                 if (localSrc != null)
                 {
@@ -386,17 +453,29 @@ namespace WotModLauncher
                         s.CopyTo(fs);
                     }
                 }
-                if (!string.IsNullOrEmpty(info.sha256) && !VerifySha256(tmp, info.sha256))
-                {
-                    File.Delete(tmp);
+                if (!VerifySha256(tmp, info.sha256))
                     return;
-                }
                 string oldPath = exe + ".old";
                 if (File.Exists(oldPath)) File.Delete(oldPath);
                 File.Move(exe, oldPath);
-                File.Move(tmp, exe);
+                try
+                {
+                    File.Move(tmp, exe);
+                }
+                catch
+                {
+                    // Without this the shortcuts would point at a missing launcher
+                    try { File.Move(oldPath, exe); }
+                    catch { }
+                    throw;
+                }
             }
             catch { }
+            finally
+            {
+                try { if (tmp != null && File.Exists(tmp)) File.Delete(tmp); }
+                catch { }
+            }
         }
 
         public static List<PendingModUpdate> FindPendingUpdates(string gamePath, string gameVer, ManifestRoot manifest)
@@ -410,7 +489,13 @@ namespace WotModLauncher
 
             foreach (ManifestModEntry entry in manifest.mods)
             {
-                if (entry == null || string.IsNullOrEmpty(entry.id) || string.IsNullOrEmpty(entry.version))
+                if (entry == null || string.IsNullOrEmpty(entry.id) || string.IsNullOrEmpty(entry.version)
+                    || string.IsNullOrEmpty(entry.url) || string.IsNullOrEmpty(entry.sha256))
+                    continue;
+
+                string rx = "^" + Regex.Escape(entry.id) + @"_([0-9]+(?:\.[0-9]+)*)\.wotmod$";
+                // file and subdir come from the network and end up in Path.Combine, so neither may leave the mods folder
+                if (!IsPlainFileName(entry.file) || !Regex.IsMatch(entry.file, rx, RegexOptions.IgnoreCase) || !IsSafeSubdir(entry.subdir))
                     continue;
 
                 string searchDir = string.IsNullOrEmpty(entry.subdir)
@@ -419,7 +504,6 @@ namespace WotModLauncher
 
                 if (!Directory.Exists(searchDir)) continue;
 
-                string rx = "^" + Regex.Escape(entry.id) + @"_([0-9]+(?:\.[0-9]+)*)\.wotmod$";
                 string foundFile = null;
                 Version foundVer = null;
 
@@ -454,6 +538,23 @@ namespace WotModLauncher
             return result;
         }
 
+        private static bool IsPlainFileName(string name)
+        {
+            if (string.IsNullOrEmpty(name) || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+                return false;
+            return name != "." && name != "..";
+        }
+
+        private static bool IsSafeSubdir(string subdir)
+        {
+            if (string.IsNullOrEmpty(subdir)) return true;
+            foreach (string part in subdir.Split('/', '\\'))
+            {
+                if (!IsPlainFileName(part)) return false;
+            }
+            return true;
+        }
+
         public static Version ParseVer(string s)
         {
             if (string.IsNullOrEmpty(s)) return null;
@@ -482,7 +583,7 @@ namespace WotModLauncher
 
         public static bool VerifySha256(string filePath, string expectedHex)
         {
-            if (!File.Exists(filePath)) return false;
+            if (string.IsNullOrEmpty(expectedHex) || !File.Exists(filePath)) return false;
             using (var sha = SHA256.Create())
             using (var fs = File.OpenRead(filePath))
             {
@@ -602,9 +703,11 @@ namespace WotModLauncher
 
     public class UpdateDialogForm : Form
     {
+        private const int MaxParallelDownloads = 4;
+
         private readonly string gamePath;
-        private readonly string gameVer;
         private readonly List<PendingModUpdate> updates;
+        private readonly string subtitleText;
 
         private readonly System.Windows.Forms.Timer animTimer;
         private float fadeProgress = 0f;
@@ -618,11 +721,15 @@ namespace WotModLauncher
         private int scrollOffset = 0;
         private int maxScroll = 0;
 
-        private bool isUpdating = false;
-        private float targetProgress = 0f;
+        private volatile bool isUpdating = false;
+        private volatile bool allowClose = false;
+        private volatile bool downloadPhase = false;
+        private volatile float targetProgress = 0f;
+        private volatile string statusText = "Готово до швидкого оновлення";
         private float displayProgress = 0f;
         private float shimmerOffset = 0f;
-        private string statusText = "Готово до швидкого оновлення";
+        private float[] downloadFractions;
+        private int downloadsCompleted;
 
         private bool dragging = false;
         private Point dragStart;
@@ -633,6 +740,10 @@ namespace WotModLauncher
         private Rectangle rectBtnUpdate;
         private Rectangle rectBtnSkip;
         private Rectangle rectProgressBar;
+        private Rectangle rectStatus;
+
+        private string[] badgeTexts;
+        private int[] badgeWidths;
 
         private readonly Font fontTitle = new Font("Segoe UI", 13.5f, FontStyle.Bold, GraphicsUnit.Point);
         private readonly Font fontSubtitle = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
@@ -649,8 +760,13 @@ namespace WotModLauncher
         private readonly SolidBrush brushTextMuted = new SolidBrush(Color.FromArgb(148, 160, 180));
         private readonly SolidBrush brushBadgeBg = new SolidBrush(Color.FromArgb(32, 54, 44));
         private readonly SolidBrush brushBadgeFg = new SolidBrush(Color.FromArgb(110, 231, 160));
+        private readonly SolidBrush brushThumb = new SolidBrush(Color.FromArgb(90, 110, 140));
+        private readonly SolidBrush brushTrack = new SolidBrush(Color.FromArgb(28, 35, 48));
         private readonly Pen penBorder = new Pen(Color.FromArgb(46, 56, 76), 1f);
         private readonly Pen penAccentTop = new Pen(Color.FromArgb(229, 154, 40), 2f);
+        private readonly Pen penClose = new Pen(Color.FromArgb(200, 210, 225), 1.8f);
+        private readonly StringFormat sfCenter = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+        private readonly StringFormat sfChanges = new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
 
         private const int CardHeight = 68;
         private const int CardGap = 8;
@@ -658,8 +774,8 @@ namespace WotModLauncher
         public UpdateDialogForm(string gamePath, string gameVer, List<PendingModUpdate> updates)
         {
             this.gamePath = gamePath;
-            this.gameVer = gameVer;
             this.updates = updates;
+            this.subtitleText = string.Format("Знайдено нових оновлень: {0} • Клієнт WoT {1}", updates.Count, gameVer);
 
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.CenterScreen;
@@ -683,7 +799,7 @@ namespace WotModLauncher
             animTimer = new System.Windows.Forms.Timer();
             animTimer.Interval = 15;
             animTimer.Tick += OnAnimTick;
-            this.Shown += (s, e) => animTimer.Start();
+            this.Shown += (s, e) => Animate();
         }
 
         protected override CreateParams CreateParams
@@ -702,6 +818,7 @@ namespace WotModLauncher
             rectHeader = new Rectangle(0, 0, Width, 68);
             rectClose = new Rectangle(Width - 42, 14, 28, 28);
             rectListViewport = new Rectangle(20, 80, Width - 40, Height - 185);
+            rectStatus = new Rectangle(16, Height - 117, Width - 32, 22);
             rectProgressBar = new Rectangle(20, Height - 92, Width - 40, 14);
             rectBtnUpdate = new Rectangle(20, Height - 60, 315, 42);
             rectBtnSkip = new Rectangle(348, Height - 60, Width - 368, 42);
@@ -717,29 +834,62 @@ namespace WotModLauncher
             return cur + diff * speed;
         }
 
+        private void Animate()
+        {
+            // The timer only runs while something is moving; an idle dialog costs no CPU
+            if (!IsDisposed && !animTimer.Enabled) animTimer.Start();
+        }
+
+        private void InvalidateArea(Rectangle r)
+        {
+            r.Inflate(2, 2);
+            Invalidate(r);
+        }
+
+        private float DownloadProgress()
+        {
+            float[] fractions = downloadFractions;
+            if (fractions == null || fractions.Length == 0) return targetProgress;
+            float sum = 0f;
+            for (int i = 0; i < fractions.Length; i++) sum += fractions[i];
+            return 8f + sum * 84f / fractions.Length;
+        }
+
         private void OnAnimTick(object sender, EventArgs e)
         {
-            bool dirty = false;
+            bool animating = false;
 
             if (fadeProgress < 1f)
             {
+                // Opacity is applied by the window manager, so the fade needs no repaint
                 fadeProgress = Math.Min(1f, fadeProgress + 0.085f);
-                float eased = 1f - (float)Math.Pow(1f - fadeProgress, 3);
-                this.Opacity = eased;
-                dirty = true;
+                this.Opacity = 1f - (float)Math.Pow(1f - fadeProgress, 3);
+                animating = true;
             }
 
             float nextUpd = Lerp(btnUpdateHover, isHoverUpdate && !isUpdating ? 1f : 0f, 0.22f);
-            float nextSkip = Lerp(btnSkipHover, isHoverSkip && !isUpdating ? 1f : 0f, 0.22f);
-            float nextClose = Lerp(btnCloseHover, isHoverClose && !isUpdating ? 1f : 0f, 0.22f);
-            if (nextUpd != btnUpdateHover || nextSkip != btnSkipHover || nextClose != btnCloseHover)
+            if (nextUpd != btnUpdateHover)
             {
                 btnUpdateHover = nextUpd;
+                InvalidateArea(rectBtnUpdate);
+                animating = true;
+            }
+            float nextSkip = Lerp(btnSkipHover, isHoverSkip && !isUpdating ? 1f : 0f, 0.22f);
+            if (nextSkip != btnSkipHover)
+            {
                 btnSkipHover = nextSkip;
+                InvalidateArea(rectBtnSkip);
+                animating = true;
+            }
+            float nextClose = Lerp(btnCloseHover, isHoverClose && !isUpdating ? 1f : 0f, 0.22f);
+            if (nextClose != btnCloseHover)
+            {
                 btnCloseHover = nextClose;
-                dirty = true;
+                InvalidateArea(rectClose);
+                animating = true;
             }
 
+            bool cardsChanged = false;
             for (int i = 0; i < updates.Count; i++)
             {
                 float target = (i == hoveredCardIndex) ? 1f : 0f;
@@ -747,19 +897,27 @@ namespace WotModLauncher
                 if (next != updates[i].HoverProgress)
                 {
                     updates[i].HoverProgress = next;
-                    dirty = true;
+                    cardsChanged = true;
                 }
+            }
+            if (cardsChanged)
+            {
+                Invalidate(rectListViewport);
+                animating = true;
             }
 
             if (isUpdating)
             {
+                if (downloadPhase) targetProgress = DownloadProgress();
                 displayProgress = Lerp(displayProgress, targetProgress, 0.18f);
                 shimmerOffset += 6f;
                 if (shimmerOffset > Width) shimmerOffset = -120f;
-                dirty = true;
+                InvalidateArea(rectProgressBar);
+                Invalidate(rectStatus);
+                animating = true;
             }
 
-            if (dirty) Invalidate();
+            if (!animating) animTimer.Stop();
         }
 
         protected override void OnMouseWheel(MouseEventArgs e)
@@ -801,9 +959,9 @@ namespace WotModLauncher
                 return;
             }
 
-            isHoverUpdate = rectBtnUpdate.Contains(e.Location);
-            isHoverSkip = rectBtnSkip.Contains(e.Location);
-            isHoverClose = rectClose.Contains(e.Location);
+            bool hoverUpdate = rectBtnUpdate.Contains(e.Location);
+            bool hoverSkip = rectBtnSkip.Contains(e.Location);
+            bool hoverClose = rectClose.Contains(e.Location);
 
             int newHoverCard = -1;
             if (rectListViewport.Contains(e.Location))
@@ -814,7 +972,15 @@ namespace WotModLauncher
                 if (idx >= 0 && idx < updates.Count && inCardY <= CardHeight)
                     newHoverCard = idx;
             }
-            hoveredCardIndex = newHoverCard;
+
+            if (hoverUpdate != isHoverUpdate || hoverSkip != isHoverSkip || hoverClose != isHoverClose || newHoverCard != hoveredCardIndex)
+            {
+                isHoverUpdate = hoverUpdate;
+                isHoverSkip = hoverSkip;
+                isHoverClose = hoverClose;
+                hoveredCardIndex = newHoverCard;
+                Animate();
+            }
 
             Cursor = (!isUpdating && (isHoverUpdate || isHoverSkip || isHoverClose))
                 ? Cursors.Hand
@@ -832,26 +998,41 @@ namespace WotModLauncher
             base.OnMouseLeave(e);
             isHoverUpdate = isHoverSkip = isHoverClose = false;
             hoveredCardIndex = -1;
+            Animate();
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            // Alt+F4 during an update would end the process while mod files are being swapped
+            if (isUpdating && !allowClose && e.CloseReason == CloseReason.UserClosing)
+            {
+                e.Cancel = true;
+                return;
+            }
+            base.OnFormClosing(e);
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
+            Rectangle clip = e.ClipRectangle;
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
 
-            g.FillRectangle(brushBg, ClientRectangle);
-            g.FillRectangle(brushHeader, rectHeader);
-            g.DrawLine(penAccentTop, 0, 1, Width, 1);
+            g.FillRectangle(brushBg, clip);
 
-            g.DrawString("ДОСТУПНІ ОНОВЛЕННЯ МОДІВ", fontTitle, brushTextMain, 20f, 12f);
-            g.DrawString(
-                string.Format("Знайдено нових оновлень: {0} • Клієнт WoT {1}", updates.Count, gameVer),
-                fontSubtitle, brushGold, 21f, 40f);
+            if (clip.IntersectsWith(rectHeader))
+            {
+                g.FillRectangle(brushHeader, rectHeader);
+                g.DrawLine(penAccentTop, 0, 1, Width, 1);
+                g.DrawString("ДОСТУПНІ ОНОВЛЕННЯ МОДІВ", fontTitle, brushTextMain, 20f, 12f);
+                g.DrawString(subtitleText, fontSubtitle, brushGold, 21f, 40f);
+                DrawCloseButton(g);
+            }
 
-            DrawCloseButton(g);
-            DrawCardsList(g);
-            DrawFooter(g);
+            if (clip.IntersectsWith(rectListViewport))
+                DrawCardsList(g, clip);
+            DrawFooter(g, clip);
 
             g.DrawRectangle(penBorder, 0, 0, Width - 1, Height - 1);
         }
@@ -864,19 +1045,29 @@ namespace WotModLauncher
                 using (var br = new SolidBrush(Color.FromArgb(a, 190, 50, 50)))
                     FillRoundedRect(g, br, rectClose, 5);
             }
-            using (var p = new Pen(Color.FromArgb(200, 210, 225), 1.8f))
+            int cx = rectClose.X + rectClose.Width / 2;
+            int cy = rectClose.Y + rectClose.Height / 2;
+            g.DrawLine(penClose, cx - 5, cy - 5, cx + 5, cy + 5);
+            g.DrawLine(penClose, cx + 5, cy - 5, cx - 5, cy + 5);
+        }
+
+        private void EnsureBadges(Graphics g)
+        {
+            if (badgeWidths != null) return;
+            badgeTexts = new string[updates.Count];
+            badgeWidths = new int[updates.Count];
+            for (int i = 0; i < updates.Count; i++)
             {
-                int cx = rectClose.X + rectClose.Width / 2;
-                int cy = rectClose.Y + rectClose.Height / 2;
-                g.DrawLine(p, cx - 5, cy - 5, cx + 5, cy + 5);
-                g.DrawLine(p, cx + 5, cy - 5, cx - 5, cy + 5);
+                badgeTexts[i] = string.Format("v{0} → v{1}", updates[i].InstalledVersion, updates[i].Remote.version);
+                badgeWidths[i] = (int)g.MeasureString(badgeTexts[i], fontBadge).Width + 14;
             }
         }
 
-        private void DrawCardsList(Graphics g)
+        private void DrawCardsList(Graphics g, Rectangle clip)
         {
+            EnsureBadges(g);
             GraphicsState state = g.Save();
-            g.SetClip(rectListViewport);
+            g.SetClip(rectListViewport, CombineMode.Intersect);
 
             for (int i = 0; i < updates.Count; i++)
             {
@@ -886,6 +1077,8 @@ namespace WotModLauncher
                     continue;
 
                 Rectangle cardRect = new Rectangle(rectListViewport.X, cardY, rectListViewport.Width - (maxScroll > 0 ? 10 : 0), CardHeight);
+                if (!cardRect.IntersectsWith(clip))
+                    continue;
                 int baseR = 26 + (int)(item.HoverProgress * 12);
                 int baseG = 33 + (int)(item.HoverProgress * 15);
                 int baseB = 47 + (int)(item.HoverProgress * 20);
@@ -901,19 +1094,16 @@ namespace WotModLauncher
 
                 g.DrawString(item.Remote.title ?? item.Remote.id, fontModTitle, brushTextMain, cardRect.X + 14, cardRect.Y + 10);
 
-                string badgeText = string.Format("v{0} → v{1}", item.InstalledVersion, item.Remote.version);
-                SizeF badgeSize = g.MeasureString(badgeText, fontBadge);
-                int badgeW = (int)badgeSize.Width + 14;
+                int badgeW = badgeWidths[i];
                 Rectangle badgeRect = new Rectangle(cardRect.Right - badgeW - 14, cardRect.Y + 10, badgeW, 22);
                 FillRoundedRect(g, brushBadgeBg, badgeRect, 4);
-                g.DrawString(badgeText, fontBadge, brushBadgeFg, badgeRect.X + 7, badgeRect.Y + 3);
+                g.DrawString(badgeTexts[i], fontBadge, brushBadgeFg, badgeRect.X + 7, badgeRect.Y + 3);
 
                 string changes = string.IsNullOrEmpty(item.Remote.changes)
                     ? "Оновлення сумісності та покращення стабільності"
                     : item.Remote.changes;
                 RectangleF changesRect = new RectangleF(cardRect.X + 14, cardRect.Y + 36, cardRect.Width - 28, 24);
-                StringFormat sf = new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
-                g.DrawString(changes, fontChanges, brushTextMuted, changesRect, sf);
+                g.DrawString(changes, fontChanges, brushTextMuted, changesRect, sfChanges);
             }
 
             if (maxScroll > 0)
@@ -921,21 +1111,20 @@ namespace WotModLauncher
                 int trackX = rectListViewport.Right - 5;
                 int thumbH = Math.Max(28, (int)((float)rectListViewport.Height / (rectListViewport.Height + maxScroll) * rectListViewport.Height));
                 int thumbY = rectListViewport.Y + (int)((float)scrollOffset / maxScroll * (rectListViewport.Height - thumbH));
-                using (var brThumb = new SolidBrush(Color.FromArgb(90, 110, 140)))
-                    FillRoundedRect(g, brThumb, new Rectangle(trackX, thumbY, 4, thumbH), 2);
+                FillRoundedRect(g, brushThumb, new Rectangle(trackX, thumbY, 4, thumbH), 2);
             }
 
             g.Restore(state);
         }
 
-        private void DrawFooter(Graphics g)
+        private void DrawFooter(Graphics g, Rectangle clip)
         {
-            g.DrawString(statusText, fontStatus, brushTextMuted, 20f, Height - 115f);
+            if (clip.IntersectsWith(rectStatus))
+                g.DrawString(statusText, fontStatus, brushTextMuted, 20f, Height - 115f);
 
-            if (isUpdating || displayProgress > 0.01f)
+            if ((isUpdating || displayProgress > 0.01f) && clip.IntersectsWith(rectProgressBar))
             {
-                using (var brTrack = new SolidBrush(Color.FromArgb(28, 35, 48)))
-                    FillRoundedRect(g, brTrack, rectProgressBar, 6);
+                FillRoundedRect(g, brushTrack, rectProgressBar, 6);
 
                 int fillW = Math.Max(8, (int)(rectProgressBar.Width * (displayProgress / 100f)));
                 Rectangle fillRect = new Rectangle(rectProgressBar.X, rectProgressBar.Y, Math.Min(rectProgressBar.Width, fillW), rectProgressBar.Height);
@@ -943,30 +1132,34 @@ namespace WotModLauncher
                     FillRoundedRect(g, brFill, fillRect, 6);
 
                 GraphicsState st = g.Save();
-                g.SetClip(fillRect);
+                g.SetClip(fillRect, CombineMode.Intersect);
                 Rectangle shimRect = new Rectangle((int)shimmerOffset, rectProgressBar.Y, 90, rectProgressBar.Height);
                 using (var brShim = new LinearGradientBrush(shimRect, Color.FromArgb(0, 255, 255, 255), Color.FromArgb(95, 255, 255, 255), LinearGradientMode.Horizontal))
                     g.FillRectangle(brShim, shimRect);
                 g.Restore(st);
             }
 
-            Color cUpd1 = Color.FromArgb(210 + (int)(btnUpdateHover * 25), 125 + (int)(btnUpdateHover * 25), 22);
-            Color cUpd2 = Color.FromArgb(235 + (int)(btnUpdateHover * 20), 162 + (int)(btnUpdateHover * 25), 42);
-            if (isUpdating)
-                cUpd1 = cUpd2 = Color.FromArgb(75, 85, 100);
+            if (clip.IntersectsWith(rectBtnUpdate))
+            {
+                Color cUpd1 = Color.FromArgb(210 + (int)(btnUpdateHover * 25), 125 + (int)(btnUpdateHover * 25), 22);
+                Color cUpd2 = Color.FromArgb(235 + (int)(btnUpdateHover * 20), 162 + (int)(btnUpdateHover * 25), 42);
+                if (isUpdating)
+                    cUpd1 = cUpd2 = Color.FromArgb(75, 85, 100);
 
-            using (var brUpd = new LinearGradientBrush(rectBtnUpdate, cUpd1, cUpd2, LinearGradientMode.Vertical))
-                FillRoundedRect(g, brUpd, rectBtnUpdate, 6);
+                using (var brUpd = new LinearGradientBrush(rectBtnUpdate, cUpd1, cUpd2, LinearGradientMode.Vertical))
+                    FillRoundedRect(g, brUpd, rectBtnUpdate, 6);
+                g.DrawString(isUpdating ? "Оновлюємо моди..." : "Оновити і грати", fontButton, brushTextMain, rectBtnUpdate, sfCenter);
+            }
 
-            StringFormat centerSf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-            g.DrawString(isUpdating ? "Оновлюємо моди..." : "Оновити і грати", fontButton, brushTextMain, rectBtnUpdate, centerSf);
-
-            int skipBg = 32 + (int)(btnSkipHover * 18);
-            using (var brSkip = new SolidBrush(Color.FromArgb(skipBg, skipBg + 7, skipBg + 18)))
-                FillRoundedRect(g, brSkip, rectBtnSkip, 6);
-            using (var pSkip = new Pen(Color.FromArgb(60 + (int)(btnSkipHover * 60), 75 + (int)(btnSkipHover * 60), 100), 1f))
-                DrawRoundedRect(g, pSkip, rectBtnSkip, 6);
-            g.DrawString("Грати без оновлення", fontButton, brushTextMuted, rectBtnSkip, centerSf);
+            if (clip.IntersectsWith(rectBtnSkip))
+            {
+                int skipBg = 32 + (int)(btnSkipHover * 18);
+                using (var brSkip = new SolidBrush(Color.FromArgb(skipBg, skipBg + 7, skipBg + 18)))
+                    FillRoundedRect(g, brSkip, rectBtnSkip, 6);
+                using (var pSkip = new Pen(Color.FromArgb(60 + (int)(btnSkipHover * 60), 75 + (int)(btnSkipHover * 60), 100), 1f))
+                    DrawRoundedRect(g, pSkip, rectBtnSkip, 6);
+                g.DrawString("Грати без оновлення", fontButton, brushTextMuted, rectBtnSkip, sfCenter);
+            }
         }
 
         private static GraphicsPath CreateRoundPath(Rectangle r, int radius)
@@ -999,103 +1192,146 @@ namespace WotModLauncher
         {
             if (isUpdating) return;
             isUpdating = true;
-            statusText = "Підготовка резервної копії...";
+            statusText = "Підготовка до оновлення...";
             targetProgress = 5f;
+            Cursor = Cursors.Default;
             Invalidate();
+            Animate();
 
             Thread worker = new Thread(RunUpdateWorker);
             worker.IsBackground = true;
             worker.Start();
         }
 
+        private void PostToUi(Action action)
+        {
+            try
+            {
+                if (IsHandleCreated && !IsDisposed) BeginInvoke(action);
+            }
+            catch (InvalidOperationException) { }
+        }
+
+        private void FinishAndClose()
+        {
+            allowClose = true;
+            Close();
+        }
+
+        private static Exception RootException(Exception ex)
+        {
+            AggregateException agg = ex as AggregateException;
+            if (agg != null && agg.InnerExceptions.Count > 0)
+                return RootException(agg.Flatten().InnerExceptions[0]);
+            return ex;
+        }
+
         private void RunUpdateWorker()
         {
-            string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            string bkpDir = Path.Combine(gamePath, ".backups", "launcher", stamp);
-            var replacedPairs = new List<string[]>();
+            int total = updates.Count;
+            string[] tmpFiles = new string[total];
+            // Each entry: backup copy, original path, new path
+            var applied = new List<string[]>();
+            string bkpDir = Path.Combine(gamePath, ".backups", "launcher", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
 
             try
             {
-                Directory.CreateDirectory(bkpDir);
-                int total = updates.Count;
+                for (int i = 0; i < total; i++)
+                    tmpFiles[i] = Path.Combine(Path.GetTempPath(), "wot-upd-" + Guid.NewGuid().ToString("N") + ".wotmod");
 
+                // Every package is downloaded and verified before any installed file is touched
+                downloadFractions = new float[total];
+                downloadsCompleted = 0;
+                downloadPhase = true;
+                statusText = string.Format("Завантаження оновлень (0/{0})...", total);
+                var options = new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, Math.Min(MaxParallelDownloads, total)) };
+                Parallel.For(0, total, options, i => DownloadAndVerify(i, tmpFiles[i], total));
+                downloadPhase = false;
+                targetProgress = 92f;
+
+                statusText = "Встановлення оновлень...";
                 for (int i = 0; i < total; i++)
                 {
                     PendingModUpdate u = updates[i];
-                    ManifestModEntry rem = u.Remote;
-                    statusText = string.Format("Завантаження ({0}/{1}): {2} v{3}...", i + 1, total, rem.title ?? rem.id, rem.version);
-                    targetProgress = 8f + (i * 85f / total);
-
-                    string tmpFile = Path.Combine(Path.GetTempPath(), "wot-upd-" + Guid.NewGuid().ToString("N") + ".wotmod");
-                    DownloadFileWithProgress(rem.url, tmpFile, i, total);
-
-                    if (rem.size > 0 && new FileInfo(tmpFile).Length != rem.size)
-                    {
-                        File.Delete(tmpFile);
-                        throw new InvalidDataException("Розмір файлу не збігається для " + rem.file);
-                    }
-                    if (!string.IsNullOrEmpty(rem.sha256) && !Program.VerifySha256(tmpFile, rem.sha256))
-                    {
-                        File.Delete(tmpFile);
-                        throw new InvalidDataException("Контрольна сума SHA-256 не збігається для " + rem.file);
-                    }
-                    if (!Program.VerifyWotmodArchive(tmpFile, rem.id))
-                    {
-                        File.Delete(tmpFile);
-                        throw new InvalidDataException("Пакет .wotmod пошкоджений або має інший ID: " + rem.file);
-                    }
-
                     string relOld = u.LocalFilePath.Substring(gamePath.Length).TrimStart('\\', '/');
                     string bkpFile = Path.Combine(bkpDir, relOld);
                     Directory.CreateDirectory(Path.GetDirectoryName(bkpFile));
                     File.Copy(u.LocalFilePath, bkpFile, true);
 
-                    string destDir = Path.GetDirectoryName(u.LocalFilePath);
-                    string newDestPath = Path.Combine(destDir, rem.file);
-
+                    string newDestPath = Path.Combine(Path.GetDirectoryName(u.LocalFilePath), u.Remote.file);
+                    // Registered before the live file is deleted so any failure below is rolled back
+                    applied.Add(new string[] { bkpFile, u.LocalFilePath, newDestPath });
                     File.Delete(u.LocalFilePath);
                     if (File.Exists(newDestPath)) File.Delete(newDestPath);
-                    File.Move(tmpFile, newDestPath);
-
-                    replacedPairs.Add(new string[] { bkpFile, u.LocalFilePath, newDestPath });
+                    File.Move(tmpFiles[i], newDestPath);
+                    targetProgress = 92f + (i + 1) * 8f / total;
                 }
 
                 targetProgress = 100f;
                 statusText = "Усі моди оновлено! Запускаємо гру...";
                 Thread.Sleep(350);
-                this.BeginInvoke(new Action(() => this.Close()));
+                PostToUi(FinishAndClose);
             }
             catch (Exception ex)
             {
-                foreach (string[] pair in replacedPairs)
+                downloadPhase = false;
+                bool restored = applied.Count > 0;
+                for (int i = applied.Count - 1; i >= 0; i--)
                 {
+                    string[] pair = applied[i];
                     try
                     {
-                        if (File.Exists(pair[2])) File.Delete(pair[2]);
+                        if (!string.Equals(pair[2], pair[1], StringComparison.OrdinalIgnoreCase) && File.Exists(pair[2]))
+                            File.Delete(pair[2]);
                         if (File.Exists(pair[0])) File.Copy(pair[0], pair[1], true);
                     }
                     catch { }
                 }
 
-                this.BeginInvoke(new Action(() =>
+                string reason = RootException(ex).Message;
+                string text = "Оновлення не вдалося (" + reason + ").\n" + (restored
+                    ? "Відновлено попередні версії модів, запускаємо гру."
+                    : "Встановлені моди не змінено, запускаємо гру.");
+                PostToUi(() =>
                 {
-                    MessageBox.Show(
-                        "Оновлення не вдалося (" + ex.Message + ").\nВідновлено попередні версії модів, запускаємо гру.",
-                        "WoT Modpack Launcher",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Warning);
-                    this.Close();
-                }));
+                    MessageBox.Show(this, text, "WoT Modpack Launcher", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    FinishAndClose();
+                });
+            }
+            finally
+            {
+                foreach (string tmp in tmpFiles)
+                {
+                    try { if (tmp != null && File.Exists(tmp)) File.Delete(tmp); }
+                    catch { }
+                }
             }
         }
 
-        private void DownloadFileWithProgress(string url, string dstPath, int index, int total)
+        private void DownloadAndVerify(int index, string tmpFile, int total)
+        {
+            ManifestModEntry rem = updates[index].Remote;
+            DownloadFileWithProgress(rem.url, tmpFile, index);
+
+            if (rem.size > 0 && new FileInfo(tmpFile).Length != rem.size)
+                throw new InvalidDataException("Розмір файлу не збігається для " + rem.file);
+            if (!Program.VerifySha256(tmpFile, rem.sha256))
+                throw new InvalidDataException("Контрольна сума SHA-256 не збігається для " + rem.file);
+            if (!Program.VerifyWotmodArchive(tmpFile, rem.id))
+                throw new InvalidDataException("Пакет .wotmod пошкоджений або має інший ID: " + rem.file);
+
+            downloadFractions[index] = 1f;
+            int done = Interlocked.Increment(ref downloadsCompleted);
+            statusText = string.Format("Завантаження оновлень ({0}/{1}): {2} v{3}", done, total, rem.title ?? rem.id, rem.version);
+        }
+
+        private void DownloadFileWithProgress(string url, string dstPath, int index)
         {
             string localSrc = Program.ResolveLocalUrl(url);
             if (localSrc != null)
             {
                 File.Copy(localSrc, dstPath, true);
-                if (total > 0) targetProgress = 8f + ((index + 1f) * 85f / total);
+                downloadFractions[index] = 0.99f;
                 return;
             }
 
@@ -1105,10 +1341,10 @@ namespace WotModLauncher
             req.ReadWriteTimeout = 15000;
             using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
             using (Stream s = resp.GetResponseStream())
-            using (FileStream fs = File.Create(dstPath))
+            using (FileStream fs = new FileStream(dstPath, FileMode.Create, FileAccess.Write, FileShare.None, 65536))
             {
                 long len = resp.ContentLength;
-                byte[] buf = new byte[16384];
+                byte[] buf = new byte[65536];
                 long readTotal = 0;
                 int n;
                 while ((n = s.Read(buf, 0, buf.Length)) > 0)
@@ -1116,10 +1352,7 @@ namespace WotModLauncher
                     fs.Write(buf, 0, n);
                     readTotal += n;
                     if (len > 0)
-                    {
-                        float fileFrac = (float)readTotal / len;
-                        targetProgress = 8f + ((index + fileFrac) * 85f / total);
-                    }
+                        downloadFractions[index] = Math.Min(0.99f, (float)readTotal / len);
                 }
             }
         }
@@ -1143,8 +1376,13 @@ namespace WotModLauncher
                 brushTextMuted.Dispose();
                 brushBadgeBg.Dispose();
                 brushBadgeFg.Dispose();
+                brushThumb.Dispose();
+                brushTrack.Dispose();
                 penBorder.Dispose();
                 penAccentTop.Dispose();
+                penClose.Dispose();
+                sfCenter.Dispose();
+                sfChanges.Dispose();
             }
             base.Dispose(disposing);
         }
