@@ -2,6 +2,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import zipfile
 
 py27 = 'py27_dist/python.exe'
@@ -18,12 +19,11 @@ def get_game_version():
 
 ver = get_game_version()
 
+# Background FPS Limiter and Spectator+ are compiled and packaged by their own build.py below
 py_targets = [
     'mods/configs/server_online/mod_server_online_autoconnect.py',
     'mods/configs/platoon_autostart/mod_platoon_autostart.py',
-    'mods/configs/armor_flashlight/mod_armor_flashlight_brightness.py',
-    'mods/configs/background_fps_limiter/mod_background_fps_limiter.py',
-    'scratch/spectator_hud/mod_spectator_teammate_hud.py'
+    'mods/configs/armor_flashlight/mod_armor_flashlight_brightness.py'
 ]
 
 for pf in py_targets:
@@ -33,30 +33,25 @@ print('Compiled all Python 2.7 scripts.')
 def create_or_update_wotmod(src_wotmod, dst_wotmod, update_map):
     temp_path = dst_wotmod + '.tmp'
     os.makedirs(os.path.dirname(dst_wotmod), exist_ok=True)
-    if os.path.exists(src_wotmod):
-        with zipfile.ZipFile(src_wotmod, 'r') as zin:
-            with zipfile.ZipFile(temp_path, 'w', compression=zipfile.ZIP_STORED) as zout:
+    written = set()
+    with zipfile.ZipFile(temp_path, 'w', compression=zipfile.ZIP_STORED) as zout:
+        if os.path.exists(src_wotmod):
+            with zipfile.ZipFile(src_wotmod, 'r') as zin:
                 for item in zin.infolist():
-                    data = update_map.get(item.filename, zin.read(item.filename))
+                    # Members that are replaced anyway are not read from the old package
+                    data = update_map[item.filename] if item.filename in update_map else zin.read(item.filename)
                     zinfo = zipfile.ZipInfo(item.filename)
                     zinfo.compress_type = zipfile.ZIP_STORED
                     zinfo.date_time = item.date_time
                     zinfo.external_attr = item.external_attr
                     zout.writestr(zinfo, data)
-                for fname, data in update_map.items():
-                    if fname not in [i.filename for i in zin.infolist()]:
-                        zinfo = zipfile.ZipInfo(fname)
-                        zinfo.compress_type = zipfile.ZIP_STORED
-                        zout.writestr(zinfo, data)
-    else:
-        with zipfile.ZipFile(temp_path, 'w', compression=zipfile.ZIP_STORED) as zout:
-            for fname, data in update_map.items():
+                    written.add(item.filename)
+        for fname, data in update_map.items():
+            if fname not in written:
                 zinfo = zipfile.ZipInfo(fname)
                 zinfo.compress_type = zipfile.ZIP_STORED
                 zout.writestr(zinfo, data)
-    if os.path.exists(dst_wotmod):
-        os.remove(dst_wotmod)
-    os.rename(temp_path, dst_wotmod)
+    os.replace(temp_path, dst_wotmod)
 
 build_dir = f'build/mods/{ver}'
 os.makedirs(build_dir, exist_ok=True)
@@ -119,25 +114,12 @@ create_or_update_wotmod(src_arm, dst_arm, {
     'res/scripts/client/gui/mods/mod_armor_flashlight_brightness.pyc': arm_pyc
 })
 
-src_fps = find_src_or_base('ua.background_fps_limiter_1.0.4.wotmod', 'ua.background_fps_limiter_1.0.3.wotmod')
+# These builders write the packages below themselves (FPS also embeds the native focus helper)
 dst_fps = f'{build_dir}/ua.background_fps_limiter_1.0.4.wotmod'
-with open('mods/configs/background_fps_limiter/mod_background_fps_limiter.pyc', 'rb') as f:
-    fps_pyc = f.read()
-fps_meta = """<root>
-    <id>ua.background_fps_limiter</id>
-    <version>1.0.4</version>
-    <name>Background FPS Limiter</name>
-    <description>Limits client frame rate while the window is not focused to cut idle GPU and CPU load.</description>
-</root>"""
-create_or_update_wotmod(src_fps, dst_fps, {
-    'meta.xml': fps_meta,
-    'res/scripts/client/gui/mods/mod_background_fps_limiter.pyc': fps_pyc
-})
-
-subprocess.check_call(['python', 'scratch/background_fps/build.py'])
-subprocess.check_call(['python', 'scratch/research_btn/build.py', '--install'])
-subprocess.check_call(['python', 'scratch/spectator_hud/build.py', '--no-staging'])
-dst_hud = f'{build_dir}/ua.spectator_teammate_hud_1.0.9.wotmod'
+dst_hud = f'{build_dir}/ua.spectator_teammate_hud_1.0.11.wotmod'
+subprocess.check_call([sys.executable, 'scratch/background_fps/build.py'])
+subprocess.check_call([sys.executable, 'scratch/research_btn/build.py', '--install'])
+subprocess.check_call([sys.executable, 'scratch/spectator_hud/build.py', '--no-staging'])
 
 for mod_file in [dst_srv, dst_plt, dst_arm, dst_fps, dst_hud]:
     live_target = os.path.join(f'mods/{ver}', os.path.basename(mod_file))
@@ -167,6 +149,11 @@ old_mods = [
     'ua.platoon_autostart_1.0.2.wotmod',
     'ua.armor_flashlight_brightness_1.0.1.wotmod',
     'ua.spectator_teammate_hud_1.0.8.wotmod',
+    'ua.spectator_teammate_hud_1.0.9.wotmod',
+    'ua.spectator_teammate_hud_1.0.10.wotmod',
+    'ua.research_button_1.2.0.wotmod',
+    'ua.research_button_1.2.1.wotmod',
+    'ua.research_button_1.2.2.wotmod',
     'ua.research_button_1.2.3.wotmod'
 ]
 for om in old_mods:
@@ -186,7 +173,7 @@ for wm in all_wotmods:
             assert item.compress_type == zipfile.ZIP_STORED, f'{wm}: {item.filename} not ZIP_STORED'
 print('Verified: all wotmod packages have compress_type == 0.')
 
-if '--run-tests' in __import__('sys').argv:
+if '--run-tests' in sys.argv:
     subprocess.check_call([py27, 'scratch/test_hangar_detection.py'])
     subprocess.check_call([py27, 'scratch/spectator_hud/test_mod_integration.py'])
 print('MOD BUILD FINISHED: sources compiled, wotmods packaged, live mods folder updated.')

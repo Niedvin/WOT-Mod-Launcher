@@ -58,7 +58,9 @@ def iter_staged_wotmods():
         ver_dir = os.path.join(mod_dir, "game_files", "mods", "_VERSION_")
         if not os.path.isdir(ver_dir):
             continue
-        for root, _, files in os.walk(ver_dir):
+        for root, dirs, files in os.walk(ver_dir):
+            # Stable manifest order across machines and runs
+            dirs.sort()
             for fname in sorted(files):
                 if not fname.endswith(".wotmod"):
                     continue
