@@ -12,6 +12,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -45,7 +46,7 @@ namespace WotModpackInstaller
         {
             string sizeStr;
             if (size_bytes > 1024 * 1024)
-                sizeStr = string.Format("{0:0.1} MB", size_bytes / (1024.0 * 1024.0));
+                sizeStr = string.Format("{0:0.0} MB", size_bytes / (1024.0 * 1024.0));
             else
                 sizeStr = string.Format("{0} KB", Math.Max(1, size_bytes / 1024));
 
@@ -147,6 +148,7 @@ namespace WotModpackInstaller
         private string detectedGameVersion = "2.4.1.0";
         private string modsRootPath = "";
         private ManualResetEvent prefetchDone = new ManualResetEvent(false);
+        private volatile bool installing;
         private static string payloadDir;
 
         public MainForm()
@@ -174,7 +176,17 @@ namespace WotModpackInstaller
         private void InitializeComponent()
         {
             this.Text = "WoT Modpack by Niedvin — Інсталятор модів";
-            this.FormClosing += (s, e) => SaveSettings();
+            this.FormClosing += (s, e) =>
+            {
+                // Closing mid-install would kill the worker between backup and copy
+                if (installing && e.CloseReason == CloseReason.UserClosing)
+                {
+                    e.Cancel = true;
+                    MessageBox.Show(this, "Встановлення ще триває. Дочекайтеся завершення.", "Інсталятор", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                SaveSettings();
+            };
             this.ClientSize = new Size(856, 748);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
@@ -459,11 +471,14 @@ namespace WotModpackInstaller
 
         private class SectionPanel : Panel
         {
-            public string Title;
+            private static readonly Font TitleFont = new Font("Segoe UI", 8.25F, FontStyle.Bold, GraphicsUnit.Point);
+            private static readonly SolidBrush TitleBrush = new SolidBrush(Color.FromArgb(150, 162, 186));
+            private static readonly Pen BorderPen = new Pen(Color.FromArgb(45, 56, 84), 1.4f);
+            public readonly string Title;
 
             public SectionPanel(string title)
             {
-                Title = title;
+                Title = string.IsNullOrEmpty(title) ? null : title.ToUpper();
                 BackColor = Color.FromArgb(27, 34, 51);
                 SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
             }
@@ -482,12 +497,10 @@ namespace WotModpackInstaller
                     path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
                     path.CloseFigure();
                     using (var br = new SolidBrush(BackColor)) g.FillPath(br, path);
-                    using (var pen = new Pen(Color.FromArgb(45, 56, 84), 1.4f)) g.DrawPath(pen, path);
+                    g.DrawPath(BorderPen, path);
                 }
-                if (!string.IsNullOrEmpty(Title))
-                    using (var f = new Font("Segoe UI", 8.25F, FontStyle.Bold, GraphicsUnit.Point))
-                    using (var br = new SolidBrush(Color.FromArgb(150, 162, 186)))
-                        g.DrawString(Title.ToUpper(), f, br, 14f, 8f);
+                if (Title != null)
+                    g.DrawString(Title, TitleFont, TitleBrush, 14f, 8f);
             }
         }
 
@@ -868,26 +881,53 @@ namespace WotModpackInstaller
             return "";
         }
 
-        private string FindWotPathFromRunningProcess()
+        internal static Process[] FindGameProcesses()
         {
-            string[] procNames = new string[] { "WorldOfTanks", "WorldOfTanks32" };
-            foreach (var name in procNames)
+            var found = new List<Process>();
+            Process[] all;
+            try { all = Process.GetProcesses(); }
+            catch { return found.ToArray(); }
+            foreach (Process p in all)
             {
+                bool keep = false;
                 try
                 {
-                    var procs = Process.GetProcessesByName(name);
-                    foreach (var p in procs)
-                    {
-                        try
-                        {
-                            string fn = p.MainModule.FileName;
-                            string cleaned = CleanCandidatePath(fn);
-                            if (!string.IsNullOrEmpty(cleaned)) return cleaned;
-                        }
-                        catch { }
-                    }
+                    string name = p.ProcessName;
+                    keep = string.Equals(name, "WorldOfTanks", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(name, "WorldOfTanks32", StringComparison.OrdinalIgnoreCase);
                 }
                 catch { }
+                if (keep) found.Add(p);
+                else p.Dispose();
+            }
+            return found.ToArray();
+        }
+
+        internal static bool IsGameRunning()
+        {
+            Process[] procs = FindGameProcesses();
+            foreach (Process p in procs) p.Dispose();
+            return procs.Length > 0;
+        }
+
+        private string FindWotPathFromRunningProcess()
+        {
+            Process[] procs = FindGameProcesses();
+            try
+            {
+                foreach (var p in procs)
+                {
+                    try
+                    {
+                        string cleaned = CleanCandidatePath(p.MainModule.FileName);
+                        if (!string.IsNullOrEmpty(cleaned)) return cleaned;
+                    }
+                    catch { }
+                }
+            }
+            finally
+            {
+                foreach (var p in procs) p.Dispose();
             }
             return "";
         }
@@ -1050,19 +1090,20 @@ namespace WotModpackInstaller
             {
                 try
                 {
-                    var dirs = Directory.GetDirectories(modsDir);
-                    List<string> versions = new List<string>();
-                    foreach (var d in dirs)
+                    string best = null;
+                    Version bestVersion = null;
+                    foreach (var d in Directory.GetDirectories(modsDir))
                     {
                         string name = Path.GetFileName(d);
-                        if (Regex.IsMatch(name, @"^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$"))
-                            versions.Add(name);
+                        Version v;
+                        if (Regex.IsMatch(name, @"^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$") && Version.TryParse(name, out v)
+                            && (bestVersion == null || v > bestVersion))
+                        {
+                            bestVersion = v;
+                            best = name;
+                        }
                     }
-                    if (versions.Count > 0)
-                    {
-                        versions.Sort();
-                        return versions[versions.Count - 1];
-                    }
+                    if (best != null) return best;
                 }
                 catch { }
             }
@@ -1117,16 +1158,7 @@ namespace WotModpackInstaller
             Log(string.Format("Вибрано модів: {0} (разом із системними)", selected.Count));
             SaveSettings();
 
-            Process[] runningProcs = new Process[0];
-            try
-            {
-                var list = new List<Process>();
-                list.AddRange(Process.GetProcessesByName("WorldOfTanks"));
-                list.AddRange(Process.GetProcessesByName("WorldOfTanks32"));
-                runningProcs = list.ToArray();
-            }
-            catch { }
-
+            Process[] runningProcs = FindGameProcesses();
             if (runningProcs.Length > 0)
             {
                 DialogResult dr = MessageBox.Show(
@@ -1154,16 +1186,22 @@ namespace WotModpackInstaller
                         {
                             LogWarn("Не вдалося закрити процес гри: " + RootCause(ex));
                         }
+                        finally
+                        {
+                            p.Dispose();
+                        }
                     }
                     Thread.Sleep(800);
                 }
                 else
                 {
+                    foreach (var p in runningProcs) p.Dispose();
                     Log("Встановлення скасовано: гра працює");
                     return;
                 }
             }
 
+            installing = true;
             btnInstall.Enabled = false;
             btnBrowse.Enabled = false;
             btnSelectAll.Enabled = false;
@@ -1321,6 +1359,7 @@ namespace WotModpackInstaller
                     box += string.Format("\n\nНе скопійовано файлів: {0}.\nПодробиці — кнопка «Лог файл».", failedFiles);
 
                 this.Invoke(new Action(() => {
+                    installing = false;
                     btnInstall.Enabled = true;
                     btnBrowse.Enabled = true;
                     btnSelectAll.Enabled = true;
@@ -1341,6 +1380,7 @@ namespace WotModpackInstaller
                 Log("Повний лог: " + LogFilePath);
                 UpdateStatus("Помилка під час встановлення.");
                 this.Invoke(new Action(() => {
+                    installing = false;
                     btnInstall.Enabled = true;
                     btnBrowse.Enabled = true;
                     btnSelectAll.Enabled = true;
@@ -1539,7 +1579,15 @@ namespace WotModpackInstaller
                     Directory.CreateDirectory(destDir);
                 }
 
-                if (!string.IsNullOrEmpty(backupDir) && File.Exists(destPath))
+                string relNorm = rel.Replace('/', '\\');
+                bool destExists = File.Exists(destPath);
+                if (destExists && relNorm.StartsWith(@"mods\configs\net.openwg", StringComparison.OrdinalIgnoreCase))
+                {
+                    Log("    збережено налаштування користувача: " + rel);
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(backupDir) && destExists)
                 {
                     try
                     {
@@ -1555,13 +1603,7 @@ namespace WotModpackInstaller
                     }
                 }
 
-                string relNorm = rel.Replace('/', '\\');
-                if (File.Exists(destPath) && relNorm.StartsWith(@"mods\configs\net.openwg", StringComparison.OrdinalIgnoreCase))
-                {
-                    Log("    збережено налаштування користувача: " + rel);
-                    continue;
-                }
-                bool isNew = !File.Exists(destPath);
+                bool isNew = !destExists;
                 try
                 {
                     File.Copy(file, destPath, true);
@@ -1803,23 +1845,63 @@ namespace WotModpackInstaller
                 logger("[Видалення] Прибрано ярлик модпаку з меню Пуск.");
             }
 
-            if (Directory.Exists(targetDir))
+            string startMenuModDir = Path.GetDirectoryName(startMenuModShortcut);
+            try
             {
+                if (Directory.Exists(startMenuModDir) && Directory.GetFileSystemEntries(startMenuModDir).Length == 0)
+                    Directory.Delete(startMenuModDir);
+            }
+            catch { }
+
+            // Only launcher-owned files go: the same folder keeps this installer's log, settings and the payload it is using
+            int removedFiles = 0;
+            foreach (string name in new string[] { "WotModLauncher.exe", "WotModLauncher.exe.old", "WotModLauncher.exe.new", "launcher.json" })
+            {
+                string file = Path.Combine(targetDir, name);
+                if (!File.Exists(file)) continue;
                 try
                 {
-                    Directory.Delete(targetDir, true);
-                    logger("[Видалення] Видалено папку лаунчера: " + targetDir);
+                    File.Delete(file);
+                    removedFiles++;
                 }
                 catch (Exception ex)
                 {
-                    logger("[Видалення] Не вдалося повністю видалити папку лаунчера: " + ex.Message);
+                    logger("[Видалення] Не вдалося видалити " + file + ": " + RootCause(ex));
                 }
+            }
+            try
+            {
+                if (Directory.Exists(bkpDir)) Directory.Delete(bkpDir, true);
+            }
+            catch (Exception ex)
+            {
+                logger("[Видалення] Не вдалося прибрати бекап ярликів: " + RootCause(ex));
+            }
+            if (removedFiles > 0)
+                logger("[Видалення] Видалено лаунчер з папки " + targetDir);
+        }
+
+        private sealed class TimeoutWebClient : WebClient
+        {
+            // WebClient waits 100 s per request by default, longer than the installer waits for the whole check
+            public int TimeoutMs = 20000;
+
+            protected override WebRequest GetWebRequest(Uri address)
+            {
+                WebRequest request = base.GetWebRequest(address);
+                if (request != null)
+                {
+                    request.Timeout = TimeoutMs;
+                    HttpWebRequest http = request as HttpWebRequest;
+                    if (http != null) http.ReadWriteTimeout = TimeoutMs;
+                }
+                return request;
             }
         }
 
         private WebClient NewWebClient()
         {
-            var wc = new WebClient();
+            var wc = new TimeoutWebClient();
             wc.Headers[HttpRequestHeader.UserAgent] = "wot-modpack-installer";
             wc.Encoding = System.Text.Encoding.UTF8;
             return wc;
@@ -1831,32 +1913,44 @@ namespace WotModpackInstaller
             return Version.TryParse(s.TrimStart('v', 'V'), out v) ? v : null;
         }
 
+        private static readonly object prefetchLock = new object();
+        private static readonly Dictionary<string, object> jsonCache = new Dictionary<string, object>();
+        private static readonly Dictionary<string, string> zipCache = new Dictionary<string, string>();
+
+        private object DownloadJsonCached(string url)
+        {
+            // Several sources share one release listing (three OpenWG GPU packages live in one repository)
+            lock (prefetchLock)
+            {
+                object cached;
+                if (jsonCache.TryGetValue(url, out cached)) return cached;
+            }
+            object parsed;
+            using (var wc = NewWebClient())
+                parsed = new JavaScriptSerializer().DeserializeObject(wc.DownloadString(url));
+            lock (prefetchLock) jsonCache[url] = parsed;
+            return parsed;
+        }
+
         private string[] GetLatestRelease(UpdateSource src)
         {
-            var json = new JavaScriptSerializer();
             var assets = new List<string[]>();
-            using (var wc = NewWebClient())
+            if (src.kind == "github")
             {
-                if (src.kind == "github")
-                {
-                    var rel = (Dictionary<string, object>)json.DeserializeObject(
-                        wc.DownloadString("https://api.github.com/repos/" + src.repo + "/releases/latest"));
-                    foreach (Dictionary<string, object> a in (object[])rel["assets"])
-                        assets.Add(new[] { (string)a["name"], (string)a["browser_download_url"] });
-                }
-                else
-                {
-                    string enc = Uri.EscapeDataString(src.repo);
-                    var proj = (Dictionary<string, object>)json.DeserializeObject(
-                        wc.DownloadString("https://gitlab.com/api/v4/projects/" + enc));
-                    var rels = (object[])json.DeserializeObject(
-                        wc.DownloadString("https://gitlab.com/api/v4/projects/" + enc + "/releases?per_page=1"));
-                    if (rels.Length == 0) return null;
-                    var rel = (Dictionary<string, object>)rels[0];
-                    string desc = rel.ContainsKey("description") ? (rel["description"] as string ?? "") : "";
-                    foreach (Match m in Regex.Matches(desc, @"\((/uploads/[0-9a-f]+/([^)\s]+\.wotmod))\)"))
-                        assets.Add(new[] { m.Groups[2].Value, "https://gitlab.com/-/project/" + proj["id"] + m.Groups[1].Value });
-                }
+                var rel = (Dictionary<string, object>)DownloadJsonCached("https://api.github.com/repos/" + src.repo + "/releases/latest");
+                foreach (Dictionary<string, object> a in (object[])rel["assets"])
+                    assets.Add(new[] { (string)a["name"], (string)a["browser_download_url"] });
+            }
+            else
+            {
+                string enc = Uri.EscapeDataString(src.repo);
+                var proj = (Dictionary<string, object>)DownloadJsonCached("https://gitlab.com/api/v4/projects/" + enc);
+                var rels = (object[])DownloadJsonCached("https://gitlab.com/api/v4/projects/" + enc + "/releases?per_page=1");
+                if (rels.Length == 0) return null;
+                var rel = (Dictionary<string, object>)rels[0];
+                string desc = rel.ContainsKey("description") ? (rel["description"] as string ?? "") : "";
+                foreach (Match m in Regex.Matches(desc, @"\((/uploads/[0-9a-f]+/([^)\s]+\.wotmod))\)"))
+                    assets.Add(new[] { m.Groups[2].Value, "https://gitlab.com/-/project/" + proj["id"] + m.Groups[1].Value });
             }
             string rx = "^" + Regex.Escape(src.id) + @"_(.+)\.wotmod$";
             foreach (var a in assets)
@@ -1879,16 +1973,32 @@ namespace WotModpackInstaller
             }
         }
 
+        private static string NewTempPath(string extension)
+        {
+            return Path.Combine(Path.GetTempPath(), "wot-modpack-" + Guid.NewGuid().ToString("N") + extension);
+        }
+
+        private static void DeleteQuietly(string path)
+        {
+            try
+            {
+                if (path != null && File.Exists(path)) File.Delete(path);
+            }
+            catch { }
+        }
+
         private void PrefetchUpdates()
         {
             try
             {
-                foreach (var mod in loadedMods)
+                var work = loadedMods.FindAll(m => m.updates != null && m.updates.Length > 0);
+                // Mods are independent, so their release checks run side by side; sources of one mod stay in order
+                var options = new ParallelOptions { MaxDegreeOfParallelism = 4 };
+                Parallel.ForEach(work, options, mod =>
                 {
-                    if (mod.updates == null) continue;
                     foreach (var src in mod.updates)
                         PrefetchSource(mod, src);
-                }
+                });
             }
             catch (Exception ex)
             {
@@ -1896,12 +2006,17 @@ namespace WotModpackInstaller
             }
             finally
             {
+                lock (prefetchLock)
+                {
+                    // Release archives can be tens of MB; nothing needs them once the packages are extracted
+                    foreach (string zip in zipCache.Values) DeleteQuietly(zip);
+                    zipCache.Clear();
+                    jsonCache.Clear();
+                }
                 prefetchDone.Set();
                 LogOk("[Оновлення] Перевірку оновлень завершено");
             }
         }
-
-        private static readonly Dictionary<string, string> zipCache = new Dictionary<string, string>();
 
         private static Version PadVersion(Version v)
         {
@@ -1910,31 +2025,37 @@ namespace WotModpackInstaller
 
         private string DownloadReleaseZip(string url)
         {
-            string cached;
-            if (zipCache.TryGetValue(url, out cached) && File.Exists(cached)) return cached;
-            string tmp = Path.Combine(Path.GetTempPath(), "wot-modpack-" + Guid.NewGuid().ToString("N") + ".zip");
-            using (var wc = NewWebClient()) wc.DownloadFile(url, tmp);
-            zipCache[url] = tmp;
+            lock (prefetchLock)
+            {
+                string cached;
+                if (zipCache.TryGetValue(url, out cached) && File.Exists(cached)) return cached;
+            }
+            string tmp = NewTempPath(".zip");
+            try
+            {
+                using (var wc = NewWebClient()) wc.DownloadFile(url, tmp);
+            }
+            catch
+            {
+                DeleteQuietly(tmp);
+                throw;
+            }
+            lock (prefetchLock) zipCache[url] = tmp;
             return tmp;
         }
 
         private void PrefetchZipSource(ModItem mod, UpdateSource src, string cur, Version curV)
         {
-            var json = new JavaScriptSerializer();
             string enc = Uri.EscapeDataString(src.repo);
             string url = null, tag = null;
-            using (var wc = NewWebClient())
-            {
-                var rels = (object[])json.DeserializeObject(
-                    wc.DownloadString("https://gitlab.com/api/v4/projects/" + enc + "/releases?per_page=1"));
-                if (rels.Length == 0) return;
-                var rel = (Dictionary<string, object>)rels[0];
-                tag = rel["tag_name"] as string;
-                var assets = rel["assets"] as Dictionary<string, object>;
-                if (assets != null && assets.ContainsKey("links"))
-                    foreach (Dictionary<string, object> l in (object[])assets["links"])
-                        if ((l["name"] as string) == "Wargaming") url = l["url"] as string;
-            }
+            var rels = (object[])DownloadJsonCached("https://gitlab.com/api/v4/projects/" + enc + "/releases?per_page=1");
+            if (rels.Length == 0) return;
+            var rel = (Dictionary<string, object>)rels[0];
+            tag = rel["tag_name"] as string;
+            var assets = rel["assets"] as Dictionary<string, object>;
+            if (assets != null && assets.ContainsKey("links"))
+                foreach (Dictionary<string, object> l in (object[])assets["links"])
+                    if ((l["name"] as string) == "Wargaming") url = l["url"] as string;
             Version newV = tag == null ? null : ParseVersion(tag);
             if (url == null || newV == null)
             {
@@ -1949,34 +2070,43 @@ namespace WotModpackInstaller
 
             string zipPath = DownloadReleaseZip(url);
             string rx = "^" + Regex.Escape(src.id) + @"_(.+)\.wotmod$";
-            using (var zip = ZipFile.OpenRead(zipPath))
+            string tmp = NewTempPath(".wotmod");
+            try
             {
-                ZipArchiveEntry entry = null;
-                foreach (var e in zip.Entries)
-                    if (Regex.IsMatch(e.Name, rx)) { entry = e; break; }
-                if (entry == null)
+                string entryName;
+                using (var zip = ZipFile.OpenRead(zipPath))
                 {
-                    LogWarn("[Оновлення] " + src.id + ": у архіві релізу немає пакета, лишаю версію з архіву");
-                    return;
+                    ZipArchiveEntry entry = null;
+                    foreach (var e in zip.Entries)
+                        if (Regex.IsMatch(e.Name, rx)) { entry = e; break; }
+                    if (entry == null)
+                    {
+                        LogWarn("[Оновлення] " + src.id + ": у архіві релізу немає пакета, лишаю версію з архіву");
+                        return;
+                    }
+                    entryName = entry.Name;
+                    entry.ExtractToFile(tmp, true);
                 }
-                string tmp = Path.Combine(Path.GetTempPath(), "wot-modpack-" + Guid.NewGuid().ToString("N") + ".wotmod");
-                entry.ExtractToFile(tmp, true);
                 if (!IsWotmodWithId(tmp, src.id))
                 {
-                    File.Delete(tmp);
                     LogWarn("[Оновлення] " + src.id + ": пакет з архіву пошкоджений, лишаю версію з архіву");
                     return;
                 }
-                string target = Path.Combine(Path.GetDirectoryName(cur), entry.Name);
+                string target = Path.Combine(Path.GetDirectoryName(cur), entryName);
                 if (File.Exists(target)) File.Delete(target);
                 File.Move(tmp, target);
                 if (!string.Equals(target, cur, StringComparison.OrdinalIgnoreCase)) File.Delete(cur);
                 LogOk(string.Format("[Оновлення] {0}: {1} -> {2}", src.id, curV, newV));
             }
+            finally
+            {
+                DeleteQuietly(tmp);
+            }
         }
 
         private void PrefetchSource(ModItem mod, UpdateSource src)
         {
+            string tmp = null;
             try
             {
                 string rx = "^" + Regex.Escape(src.id) + @"_(.+)\.wotmod$";
@@ -1988,6 +2118,8 @@ namespace WotModpackInstaller
                 if (cur == null) return;
 
                 Version curV = ParseVersion(Regex.Match(Path.GetFileName(cur), rx).Groups[1].Value);
+                // An unpacked payload reused from an earlier run may already hold a newer package than info.json says
+                if (mod.updates.Length == 1 && curV != null) mod.version = curV.ToString();
                 if (src.kind == "openwg_zip")
                 {
                     PrefetchZipSource(mod, src, cur, curV);
@@ -2002,24 +2134,27 @@ namespace WotModpackInstaller
                     return;
                 }
 
-                string tmp = Path.Combine(Path.GetTempPath(), "wot-modpack-" + Guid.NewGuid().ToString("N") + ".wotmod");
+                tmp = NewTempPath(".wotmod");
                 using (var wc = NewWebClient()) wc.DownloadFile(latest[1], tmp);
                 if (!IsWotmodWithId(tmp, src.id))
                 {
-                    File.Delete(tmp);
                     LogWarn("[Оновлення] " + src.id + ": завантажений файл пошкоджений, лишаю версію з архіву");
                     return;
                 }
                 string target = Path.Combine(Path.GetDirectoryName(cur), latest[0]);
                 if (File.Exists(target)) File.Delete(target);
                 File.Move(tmp, target);
-                File.Delete(cur);
+                if (!string.Equals(target, cur, StringComparison.OrdinalIgnoreCase)) File.Delete(cur);
                 if (mod.updates.Length == 1) mod.version = newV.ToString();
                 LogOk(string.Format("[Оновлення] {0}: {1} -> {2}", src.id, curV, newV));
             }
             catch (Exception ex)
             {
                 LogWarn("[Оновлення] " + src.id + ": не вдалося оновити (" + RootCause(ex) + "), лишаю версію з архіву");
+            }
+            finally
+            {
+                DeleteQuietly(tmp);
             }
         }
 
@@ -2042,7 +2177,7 @@ namespace WotModpackInstaller
             }
             Array.Sort(dirs);
             string bkp = dirs[dirs.Length - 1];
-            if (Process.GetProcessesByName("WorldOfTanks").Length > 0)
+            if (IsGameRunning())
             {
                 MessageBox.Show("Закрийте World of Tanks перед відкатом.", "Відкат", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
@@ -2094,7 +2229,7 @@ namespace WotModpackInstaller
                 MessageBox.Show("Спершу вкажіть папку World of Tanks.", "Видалення", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            if (Process.GetProcessesByName("WorldOfTanks").Length > 0 || Process.GetProcessesByName("WorldOfTanks32").Length > 0)
+            if (IsGameRunning())
             {
                 MessageBox.Show("Закрийте World of Tanks перед видаленням модів.", "Видалення", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
@@ -2156,27 +2291,35 @@ namespace WotModpackInstaller
             }
         }
 
-        private void UpdateStatus(string text)
+        private readonly int uiThreadId = Thread.CurrentThread.ManagedThreadId;
+
+        private void PostUi(Action action)
         {
-            if (this.InvokeRequired)
+            // Workers never block on the UI thread; the message queue keeps their updates in order
+            if (Thread.CurrentThread.ManagedThreadId == uiThreadId)
             {
-                this.Invoke(new Action<string>(UpdateStatus), text);
+                if (!IsDisposed) action();
                 return;
             }
-            lblStatus.Text = text;
+            try
+            {
+                if (IsHandleCreated && !IsDisposed) BeginInvoke(action);
+            }
+            catch (InvalidOperationException) { }
+        }
+
+        private void UpdateStatus(string text)
+        {
+            PostUi(() => lblStatus.Text = text);
         }
 
         private void UpdateProgress(int value)
         {
-            if (this.InvokeRequired)
-            {
-                this.Invoke(new Action<int>(UpdateProgress), value);
-                return;
-            }
-            prgInstall.Value = Math.Min(100, Math.Max(0, value));
+            PostUi(() => prgInstall.Value = Math.Min(100, Math.Max(0, value)));
         }
 
         private static readonly object logLock = new object();
+        private static readonly Encoding logEncoding = new UTF8Encoding(true);
         private static string logFilePath;
 
         internal static string LogFilePath
@@ -2217,19 +2360,18 @@ namespace WotModpackInstaller
 
         internal void Log(string msg)
         {
-            if (this.InvokeRequired)
-            {
-                this.Invoke(new Action<string>(Log), msg);
-                return;
-            }
             string line = string.Format("[{0}] {1}", DateTime.Now.ToString("HH:mm:ss"), msg);
-            txtLog.SelectionStart = txtLog.TextLength;
-            txtLog.SelectionLength = 0;
-            txtLog.SelectionColor = LogColor(msg);
-            txtLog.AppendText(line + "\r\n");
-            txtLog.SelectionStart = txtLog.TextLength;
-            txtLog.ScrollToCaret();
+            // The file keeps the exact order even when the window is already closed
             AppendToLogFile(line);
+            PostUi(() =>
+            {
+                txtLog.SelectionStart = txtLog.TextLength;
+                txtLog.SelectionLength = 0;
+                txtLog.SelectionColor = LogColor(msg);
+                txtLog.AppendText(line + "\r\n");
+                txtLog.SelectionStart = txtLog.TextLength;
+                txtLog.ScrollToCaret();
+            });
         }
 
         internal void LogOk(string msg) { Log("[ OK ] " + msg); }
@@ -2249,7 +2391,7 @@ namespace WotModpackInstaller
         {
             try
             {
-                lock (logLock) File.AppendAllText(LogFilePath, line + "\r\n", new UTF8Encoding(true));
+                lock (logLock) File.AppendAllText(LogFilePath, line + "\r\n", logEncoding);
             }
             catch { }
         }
@@ -2275,6 +2417,8 @@ namespace WotModpackInstaller
         public static void Main(string[] args)
         {
             ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
+            // Release checks for several mods run in parallel against the same hosts
+            ServicePointManager.DefaultConnectionLimit = Math.Max(ServicePointManager.DefaultConnectionLimit, 8);
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             if (args != null && args.Length > 0 && Array.IndexOf(args, "--selftest") >= 0)
@@ -2312,32 +2456,56 @@ namespace WotModpackInstaller
             }
         }
 
+        private const string PayloadStampName = ".payload-stamp";
+
         internal static string ExtractEmbeddedPayload()
         {
             if (payloadDir != null) return payloadDir;
             try
             {
+                Assembly asm = Assembly.GetExecutingAssembly();
                 string resName = null;
-                foreach (string n in Assembly.GetExecutingAssembly().GetManifestResourceNames())
+                foreach (string n in asm.GetManifestResourceNames())
                     if (n.EndsWith("payload.zip", StringComparison.OrdinalIgnoreCase)) { resName = n; break; }
                 if (resName == null) return null;
 
                 string dir = Path.Combine(GetLauncherInstallDir(), "payload");
-                if (Directory.Exists(dir)) Directory.Delete(dir, true);
-                Directory.CreateDirectory(dir);
-
-                using (Stream s = Assembly.GetExecutingAssembly().GetManifestResourceStream(resName))
-                using (ZipArchive zip = new ZipArchive(s, ZipArchiveMode.Read))
+                string stampPath = Path.Combine(dir, PayloadStampName);
+                using (Stream s = asm.GetManifestResourceStream(resName))
                 {
-                    foreach (ZipArchiveEntry entry in zip.Entries)
+                    // The module id changes with every build, so an equal stamp means this exact payload is already
+                    // unpacked and the window can open without re-extracting every package on each start
+                    string stamp = asm.ManifestModule.ModuleVersionId.ToString("N") + ":" + s.Length;
+                    try
                     {
-                        if (entry.FullName.Contains("..")) continue;
-                        string dest = Path.Combine(dir, entry.FullName);
-                        Directory.CreateDirectory(Path.GetDirectoryName(dest));
-                        using (Stream es = entry.Open())
-                        using (FileStream fs = File.Create(dest))
-                            es.CopyTo(fs);
+                        if (File.Exists(stampPath) && File.ReadAllText(stampPath) == stamp
+                            && IsValidModsRoot(Path.Combine(dir, "Mods"))
+                            && File.Exists(Path.Combine(dir, "Launcher", "WotModLauncher.exe")))
+                        {
+                            payloadDir = dir;
+                            return dir;
+                        }
                     }
+                    catch { }
+
+                    if (Directory.Exists(dir)) Directory.Delete(dir, true);
+                    Directory.CreateDirectory(dir);
+                    string root = Path.GetFullPath(dir).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                    using (ZipArchive zip = new ZipArchive(s, ZipArchiveMode.Read))
+                    {
+                        foreach (ZipArchiveEntry entry in zip.Entries)
+                        {
+                            if (string.IsNullOrEmpty(entry.Name)) continue;
+                            string dest = Path.GetFullPath(Path.Combine(dir, entry.FullName));
+                            if (!dest.StartsWith(root, StringComparison.OrdinalIgnoreCase)) continue;
+                            Directory.CreateDirectory(Path.GetDirectoryName(dest));
+                            using (Stream es = entry.Open())
+                            using (FileStream fs = new FileStream(dest, FileMode.Create, FileAccess.Write, FileShare.None, 81920))
+                                es.CopyTo(fs, 81920);
+                        }
+                    }
+                    // Written last: an interrupted extraction never looks complete
+                    File.WriteAllText(stampPath, stamp);
                 }
                 payloadDir = dir;
                 return dir;
@@ -2354,7 +2522,19 @@ namespace WotModpackInstaller
             public ModItem Mod;
             public bool IsLauncher;
             public bool IsConfigs;
+
+            public override string ToString()
+            {
+                return Display;
+            }
         }
+
+        private static readonly string[] ConfigDirs = new string[]
+        {
+            "server_online", "platoon_autostart", "armor_flashlight",
+            "spectator_teammate_hud", "background_fps_limiter", "research_button",
+            "net.openwg.wot.common", "net.openwg.gpu.upscaler"
+        };
 
         private readonly MainForm owner;
         private readonly string gamePath;
@@ -2410,7 +2590,17 @@ namespace WotModpackInstaller
                     items.Add(new UninstallItem { Display = string.Format("{0} (v{1})", mod.title, mod.version), Mod = mod });
             }
 
-            if (Directory.Exists(Path.Combine(gamePath, "mods", "configs")))
+            string configsRoot = Path.Combine(gamePath, "mods", "configs");
+            bool hasConfigs = false;
+            foreach (string sub in ConfigDirs)
+            {
+                if (Directory.Exists(Path.Combine(configsRoot, sub)))
+                {
+                    hasConfigs = true;
+                    break;
+                }
+            }
+            if (hasConfigs)
                 items.Add(new UninstallItem { Display = @"[Налаштування] Збережені конфіги модів (mods\configs\...)", IsConfigs = true });
         }
 
@@ -2518,8 +2708,22 @@ namespace WotModpackInstaller
                 }
             }
 
+            bool hasBackup = true;
+            try
+            {
+                // Removing only the launcher backs up nothing; an empty dated folder would just clutter .backups
+                if (Directory.GetFileSystemEntries(backupDir).Length == 0)
+                {
+                    Directory.Delete(backupDir);
+                    hasBackup = false;
+                }
+            }
+            catch { }
+
             MessageBox.Show(
-                string.Format("Видалено компонентів: {0}\nРезервна копія: {1}", removed, backupDir),
+                hasBackup
+                    ? string.Format("Видалено компонентів: {0}\nРезервна копія: {1}", removed, backupDir)
+                    : string.Format("Видалено компонентів: {0}", removed),
                 "Видалення завершено", MessageBoxButtons.OK, MessageBoxIcon.Information);
             DialogResult = DialogResult.OK;
             Close();
@@ -2530,20 +2734,14 @@ namespace WotModpackInstaller
             string src = Path.Combine(gamePath, "mods", "configs");
             if (!Directory.Exists(src)) return;
 
+            // Only the folders being deleted are backed up, not every third-party config under mods\configs
             string bkp = Path.Combine(backupDir, "configs");
-            CopyDirectory(src, bkp);
-
-            string[] configDirs = new string[]
-            {
-                "server_online", "platoon_autostart", "armor_flashlight",
-                "spectator_teammate_hud", "background_fps_limiter", "research_button",
-                "net.openwg.wot.common", "net.openwg.gpu.upscaler"
-            };
-            foreach (string sub in configDirs)
+            foreach (string sub in ConfigDirs)
             {
                 string dir = Path.Combine(src, sub);
                 if (Directory.Exists(dir))
                 {
+                    CopyDirectory(dir, Path.Combine(bkp, sub));
                     Directory.Delete(dir, true);
                     owner.Log(@"[Видалення] Видалено конфіги: mods\configs\" + sub);
                 }
