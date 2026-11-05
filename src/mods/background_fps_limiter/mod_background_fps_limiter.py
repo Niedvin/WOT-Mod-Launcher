@@ -44,19 +44,23 @@ def _ensure_packaged_file(mod_id, mod_version, member, target, accepted_sha256=N
     current = None
     state_path = target + '.ua-sha256'
     desired_sha256 = hashlib.sha256(data).hexdigest()
+    recorded_sha256 = None
+    if accepted_sha256 is not None and os.path.isfile(state_path):
+        with open(state_path, 'rb') as stream:
+            recorded_sha256 = stream.read().strip()
     if os.path.isfile(target):
         with open(target, 'rb') as stream:
             current = stream.read()
         if current == data:
-            if accepted_sha256 is not None:
+            # Game start is the common path: rewrite the sidecar only when it is missing or stale
+            if accepted_sha256 is not None and recorded_sha256 != desired_sha256:
                 with open(state_path, 'wb') as stream:
                     stream.write(desired_sha256)
             return True
         if accepted_sha256 is not None:
             accepted = set(accepted_sha256)
-            if os.path.isfile(state_path):
-                with open(state_path, 'rb') as stream:
-                    accepted.add(stream.read().strip())
+            if recorded_sha256:
+                accepted.add(recorded_sha256)
             if hashlib.sha256(current).hexdigest() not in accepted:
                 LOG_NOTE('[%s] Existing override differs from known mod versions; preserving it' % mod_id)
                 return False
@@ -171,6 +175,14 @@ def _focused_limit():
     return max(_FOCUSED_FPS_MIN, min(_FOCUSED_FPS_MAX, value))
 
 
+def _background_limit():
+    try:
+        target = int(_CONFIG.get('target_fps', 5))
+    except (TypeError, ValueError):
+        target = 5
+    return max(1, min(30, target))
+
+
 def _target_limit(focused):
     if not _CONFIG.get('enabled', True):
         return False, _focused_limit()
@@ -180,11 +192,7 @@ def _target_limit(focused):
         return False, _focused_limit()
     if focused:
         return True, _focused_limit()
-    try:
-        target = int(_CONFIG.get('target_fps', 5))
-    except (TypeError, ValueError):
-        target = 5
-    return True, max(1, min(30, target))
+    return True, _background_limit()
 
 
 def _update_fps_limit(focused=None):
@@ -309,7 +317,7 @@ def _init_mods_settings(gen):
             'enabled': bool(_CONFIG.get('enabled', True)),
             'column1': [
                 templates.createCheckbox(text='Увімкнути зниження FPS у фоні', varName='enabled', value=bool(_CONFIG.get('enabled', True))),
-                templates.createSlider(text='FPS у фоновому режимі', varName='target_fps', value=max(1, min(30, int(_CONFIG.get('target_fps', 5)))), min=1, max=30, interval=1, format='{{value}} FPS'),
+                templates.createSlider(text='FPS у фоновому режимі', varName='target_fps', value=_background_limit(), min=1, max=30, interval=1, format='{{value}} FPS'),
                 templates.createSlider(text='FPS у фокусі', varName='focused_fps', value=_focused_limit(), min=_FOCUSED_FPS_MIN, max=_FOCUSED_FPS_MAX, interval=10, format='{{value}} FPS')
             ],
             'column2': [

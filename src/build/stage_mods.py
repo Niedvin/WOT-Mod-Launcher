@@ -316,6 +316,14 @@ for m in mods_def:
         json.dump(info, f, indent=4, ensure_ascii=False)
     print(f"Mod prepared: {m['folder']} ({total_size / (1024*1024):.2f} MB)")
 
+# A renamed or dropped mod folder would otherwise still be offered by the installer
+expected_folders = {m['folder'] for m in mods_def}
+for name in sorted(os.listdir(mods_dir)):
+    path = os.path.join(mods_dir, name)
+    if name not in expected_folders and os.path.isdir(path):
+        shutil.rmtree(path)
+        print('Removed stale staged mod:', name)
+
 readme = '===================================================================\n'
 readme += '                WoT Modpack by Niedvin\n'
 readme += '===================================================================\n\n'

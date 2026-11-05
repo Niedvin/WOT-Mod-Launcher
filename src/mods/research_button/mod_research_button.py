@@ -27,19 +27,23 @@ def _ensure_packaged_file(mod_id, mod_version, member, target, accepted_sha256=N
     current = None
     state_path = target + '.ua-sha256'
     desired_sha256 = hashlib.sha256(data).hexdigest()
+    recorded_sha256 = None
+    if accepted_sha256 is not None and os.path.isfile(state_path):
+        with open(state_path, 'rb') as stream:
+            recorded_sha256 = stream.read().strip()
     if os.path.isfile(target):
         with open(target, 'rb') as stream:
             current = stream.read()
         if current == data:
-            if accepted_sha256 is not None:
+            # Game start is the common path: rewrite the sidecar only when it is missing or stale
+            if accepted_sha256 is not None and recorded_sha256 != desired_sha256:
                 with open(state_path, 'wb') as stream:
                     stream.write(desired_sha256)
             return True
         if accepted_sha256 is not None:
             accepted = set(accepted_sha256)
-            if os.path.isfile(state_path):
-                with open(state_path, 'rb') as stream:
-                    accepted.add(stream.read().strip())
+            if recorded_sha256:
+                accepted.add(recorded_sha256)
             if hashlib.sha256(current).hexdigest() not in accepted:
                 LOG_NOTE('[%s] Existing override differs from known mod versions; preserving it' % mod_id)
                 return False
