@@ -228,12 +228,18 @@ class NativeCrosshairMarkerAdapter(object):
         self._controller = None
         self._binding = None
         self._flags = 0
+        self._marker_info = None
+        self._client_marker = None
 
     def _ensure_controller(self):
         if self._controller is not None:
             return
         from AvatarInputHandler import aih_global_binding, gun_marker_ctrl
-        from aih_constants import GUN_MARKER_FLAG
+        from aih_constants import GUN_MARKER_FLAG, GUN_MARKER_TYPE
+        from VehicleGunRotator import GunMarkerInfo
+        # Resolved once per marker instead of on every frame of the aim ticker
+        self._marker_info = GunMarkerInfo
+        self._client_marker = GUN_MARKER_TYPE.CLIENT
         class Bindings(object):
             flags = aih_global_binding.bindRW(aih_global_binding.BINDING_ID.GUN_MARKERS_FLAGS)
         self._binding = Bindings()
@@ -246,10 +252,8 @@ class NativeCrosshairMarkerAdapter(object):
 
     def update_ballistic_marker(self, hit_point, radius, direction, collision, relax_time=0.0):
         self._ensure_controller()
-        from VehicleGunRotator import GunMarkerInfo
-        from aih_constants import GUN_MARKER_TYPE
-        info = GunMarkerInfo(0, getattr(_aim_manager, '_gun_index', None), Math.Vector3(*hit_point), Math.Vector3(direction), 2.0 * radius, 0.0, 0.0, collision)
-        self._controller.update(GUN_MARKER_TYPE.CLIENT, info, (), relax_time)
+        info = self._marker_info(0, getattr(_aim_manager, '_gun_index', None), Math.Vector3(*hit_point), Math.Vector3(direction), 2.0 * radius, 0.0, 0.0, collision)
+        self._controller.update(self._client_marker, info, (), relax_time)
 
     def clear(self):
         if self._controller is not None:
@@ -906,8 +910,11 @@ def _render_spectator_ammo(plugin):
 
 
 def _spectator_plugin_active():
+    # Called by crosshair plugins every frame of a live battle; the inactive aim manager short-circuits first
+    if not _aim_manager._is_active or not _CONFIG.get('enabled', True):
+        return False
     player = BigWorld.player() if BigWorld is not None else None
-    return _CONFIG.get('enabled', True) and _aim_manager.is_active() and player is not None and not getattr(player, 'isVehicleAlive', True)
+    return player is not None and not getattr(player, 'isVehicleAlive', True)
 
 
 def _ammo_plugin_hook(original):
@@ -1011,6 +1018,7 @@ def _aim_tick():
         return
     vehicle = _get_vehicle_entity(vehicle_id)
     now = BigWorld.serverTime()
+    relax = None
     if vehicle is not None and getattr(vehicle, 'inWorld', False):
         if hasattr(vehicle, 'isAlive') and not vehicle.isAlive():
             _on_spectate_stop()
@@ -1027,7 +1035,7 @@ def _aim_tick():
         _last_hud_update_time = now
         _update_spectator_hud(vehicle_id)
     if _aim_manager.is_active():
-        _aim_callback_id = BigWorld.callback(_ticker_delay(), _aim_tick)
+        _aim_callback_id = BigWorld.callback(relax if relax is not None else _ticker_delay(), _aim_tick)
 
 
 def _start_aim_ticker():
@@ -1200,10 +1208,13 @@ def _hooked_page_switchToPostmortem(self):
 
 def _hooked_updateVehicleGunReloadTime(self, vehicleID, timeLeft, baseTime, clipTime=None):
     result = _orig_updateVehicleGunReloadTime(self, vehicleID, timeLeft, baseTime, clipTime)
-    if _CONFIG.get('enabled', True):
-        _tracker.record_reload(vehicleID, BigWorld.serverTime(), timeLeft, baseTime, clipTime)
-        if _aim_manager.is_active() and _aim_manager._current_vehicle_id == vehicleID:
-            _update_spectator_hud(vehicleID)
+    try:
+        if _CONFIG.get('enabled', True):
+            _tracker.record_reload(vehicleID, BigWorld.serverTime(), timeLeft, baseTime, clipTime)
+            if _aim_manager.is_active() and _aim_manager._current_vehicle_id == vehicleID:
+                _update_spectator_hud(vehicleID)
+    except Exception:
+        _report_error('reload packet')
     return result
 
 
@@ -1247,6 +1258,9 @@ def _hooked_onBecomeNonPlayer(self):
     return _orig_onBecomeNonPlayer(self)
 
 
+_UNSUPPORTED_RELOAD_TAGS = frozenset(('dualGun', 'twinGun', 'autoreload', 'autoShoot', 'controllableReload', 'extraShot'))
+
+
 def _hooked_showShooting(self, *args, **kwargs):
     result = _orig_showShooting(self, *args, **kwargs)
     try:
@@ -1254,8 +1268,7 @@ def _hooked_showShooting(self, *args, **kwargs):
             gun = self.typeDescriptor.gun
             clip = getattr(gun, 'clip', (1, 0.0))
             size = getattr(clip, 'size', clip[0] if isinstance(clip, (tuple, list)) else 1)
-            tags = getattr(gun, 'tags', ())
-            unsupported = set(tags) & {'dualGun', 'twinGun', 'autoreload', 'autoShoot', 'controllableReload', 'extraShot'}
+            unsupported = _UNSUPPORTED_RELOAD_TAGS.intersection(getattr(gun, 'tags', ()))
             if getattr(self, 'isStarted', True) and size == 1 and not unsupported and not getattr(gun, 'reloadTimes', None) and gun.reloadTime > 0.0:
                 _tracker.record_shot(self.id, BigWorld.serverTime(), gun.reloadTime)
     except Exception:
@@ -1331,12 +1344,15 @@ def _hooked_damage_panel_controlling(self, vehicle):
 
 def _hooked_resetVehicleAmmo(self, oldCompactDescr, newCompactDescr, quantity, stage, timeRemaining, totalTime, index):
     result = _orig_resetVehicleAmmo(self, oldCompactDescr, newCompactDescr, quantity, stage, timeRemaining, totalTime, index)
-    if _CONFIG.get('enabled', True):
-        attached = self.getVehicleAttached() if hasattr(self, 'getVehicleAttached') else None
-        vehicle_id = attached.id if attached is not None else self.playerVehicleID
-        _tracker.replace_equipment(vehicle_id, oldCompactDescr, newCompactDescr, quantity, stage, timeRemaining, totalTime, index, BigWorld.serverTime())
-        if _aim_manager.is_active() and _aim_manager._current_vehicle_id == vehicle_id:
-            _update_spectator_hud(vehicle_id)
+    try:
+        if _CONFIG.get('enabled', True):
+            attached = self.getVehicleAttached() if hasattr(self, 'getVehicleAttached') else None
+            vehicle_id = attached.id if attached is not None else self.playerVehicleID
+            _tracker.replace_equipment(vehicle_id, oldCompactDescr, newCompactDescr, quantity, stage, timeRemaining, totalTime, index, BigWorld.serverTime())
+            if _aim_manager.is_active() and _aim_manager._current_vehicle_id == vehicle_id:
+                _update_spectator_hud(vehicle_id)
+    except Exception:
+        _report_error('equipment reset packet')
     return result
 
 
@@ -1345,11 +1361,12 @@ def _hooked_updateVehicleAmmo(self, vehicleID, compactDescr, quantity, quantityI
     try:
         if _CONFIG.get('enabled', True):
             from items import ITEM_TYPE_INDICES, getTypeOfCompactDescr
-            if not compactDescr or getTypeOfCompactDescr(compactDescr) == ITEM_TYPE_INDICES['equipment']:
+            item_type = getTypeOfCompactDescr(compactDescr) if compactDescr else None
+            if not compactDescr or item_type == ITEM_TYPE_INDICES['equipment']:
                 _tracker.record_equipment(vehicleID, compactDescr, quantity, quantityInClipOrNextStage, timeRemaining, totalTime, index, BigWorld.serverTime())
                 if _aim_manager.is_active() and _aim_manager._current_vehicle_id == vehicleID:
                     _update_spectator_hud(vehicleID)
-            elif compactDescr and getTypeOfCompactDescr(compactDescr) == ITEM_TYPE_INDICES['shell'] and _aim_manager.is_active() and _aim_manager._current_vehicle_id == vehicleID:
+            elif item_type == ITEM_TYPE_INDICES['shell'] and _aim_manager.is_active() and _aim_manager._current_vehicle_id == vehicleID:
                 _tracker.record_shell_hint(vehicleID, compactDescr, BigWorld.serverTime())
     except Exception:
         _report_error('equipment packet')
@@ -1357,8 +1374,13 @@ def _hooked_updateVehicleAmmo(self, vehicleID, compactDescr, quantity, quantityI
 
 
 def _hooked_updateGunMarker(self, vehicleID, shotPos, shotVec, dispersionAngle):
-    if _CONFIG.get('enabled', True):
-        _tracker.record_gun_marker(vehicleID, BigWorld.serverTime(), shotPos, shotVec, dispersionAngle)
+    # Server markers are only read while spectating, so a live player's own marker stream is left alone;
+    # a bad packet must never keep the native marker from updating
+    if not getattr(self, 'isVehicleAlive', True) and _CONFIG.get('enabled', True):
+        try:
+            _tracker.record_gun_marker(vehicleID, BigWorld.serverTime(), shotPos, shotVec, dispersionAngle)
+        except Exception:
+            _report_error('gun marker packet')
     return _orig_updateGunMarker(self, vehicleID, shotPos, shotVec, dispersionAngle)
 
 
@@ -1495,7 +1517,7 @@ def init():
 
     try:
         from debug_utils import LOG_NOTE
-        LOG_NOTE('[SpectatorHUD] 1.0.10 initialized')
+        LOG_NOTE('[SpectatorHUD] 1.0.11 initialized')
     except Exception:
         pass
 

@@ -37,6 +37,9 @@ _POST_BATTLE_CALLBACK_ID = None
 _POST_BATTLE_FRESH = False
 _POST_BATTLE_WAITS = 0
 _IS_FETCHING = False
+_FETCH_RESULT = None
+_FETCH_POLL_ID = None
+_FETCH_POLL_INTERVAL = 0.25
 _WAS_IN_BATTLE = False
 
 _orig_makeVO = None
@@ -99,10 +102,13 @@ def _init_mods_settings():
             if 'post_battle_relogin_enabled' in new_settings:
                 _CONFIG['post_battle_relogin_enabled'] = bool(new_settings['post_battle_relogin_enabled'])
             if 'relogin_ratio_threshold' in new_settings:
-                raw_val = float(new_settings['relogin_ratio_threshold'])
-                if raw_val <= 30.0:
-                    raw_val *= 10.0
-                _CONFIG['relogin_ratio_threshold'] = round(raw_val / 100.0, 2)
+                try:
+                    raw_val = float(new_settings['relogin_ratio_threshold'])
+                    if raw_val <= 30.0:
+                        raw_val *= 10.0
+                    _CONFIG['relogin_ratio_threshold'] = round(raw_val / 100.0, 2)
+                except (TypeError, ValueError):
+                    pass
             _save_config()
 
         ratio_pct = int(round(float(_CONFIG.get('relogin_ratio_threshold', 1.5)) * 100))
@@ -196,7 +202,9 @@ def _extract_online_data(raw_json):
 
 
 def _fetch_worker(url):
-    global _IS_FETCHING
+    # Runs off the main thread: it only stores the result, the main thread picks it up in _poll_fetch
+    global _FETCH_RESULT
+    data = None
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         req = urllib2.Request(url, headers=headers)
@@ -208,31 +216,59 @@ def _fetch_worker(url):
         except (AttributeError, TypeError):
             resp = urllib2.urlopen(req, timeout=6)
 
-        content = resp.read()
-        resp.close()
-        parsed = json.loads(content)
-        data = _extract_online_data(parsed)
-        if data:
-            # UI updates must dispatch onto BigWorld main thread — 2026-10-11
-            BigWorld.callback(0.0, lambda: _on_fetch_success(data))
+        try:
+            content = resp.read()
+        finally:
+            resp.close()
+        data = _extract_online_data(json.loads(content))
     except Exception:
         LOG_CURRENT_EXCEPTION()
     finally:
-        _IS_FETCHING = False
+        _FETCH_RESULT = data or {}
+
+
+def _cancel_fetch_poll():
+    global _FETCH_POLL_ID
+    if _FETCH_POLL_ID is not None:
+        try:
+            BigWorld.cancelCallback(_FETCH_POLL_ID)
+        except Exception:
+            pass
+        _FETCH_POLL_ID = None
+
+
+def _poll_fetch():
+    # BigWorld.callback is not safe to call from a worker thread, so the result is collected here — 2026-11-05
+    global _FETCH_POLL_ID, _FETCH_RESULT, _IS_FETCHING
+    _FETCH_POLL_ID = None
+    result = _FETCH_RESULT
+    if result is None:
+        _FETCH_POLL_ID = BigWorld.callback(_FETCH_POLL_INTERVAL, _poll_fetch)
+        return
+    _FETCH_RESULT = None
+    _IS_FETCHING = False
+    if result:
+        try:
+            _on_fetch_success(result)
+        except Exception:
+            LOG_CURRENT_EXCEPTION()
 
 
 def _request_update():
-    global _IS_FETCHING
+    global _IS_FETCHING, _FETCH_RESULT, _FETCH_POLL_ID
     if not _CONFIG.get('enabled', True):
         return
     if _IS_FETCHING:
         return
     _IS_FETCHING = True
+    _FETCH_RESULT = None
     url = _CONFIG.get('api_url', _DEFAULT_CONFIG['api_url'])
     try:
         worker = threading.Thread(target=_fetch_worker, args=(url,))
         worker.daemon = True
         worker.start()
+        _cancel_fetch_poll()
+        _FETCH_POLL_ID = BigWorld.callback(_FETCH_POLL_INTERVAL, _poll_fetch)
     except Exception:
         _IS_FETCHING = False
         LOG_CURRENT_EXCEPTION()
@@ -616,6 +652,7 @@ def init():
 
 def fini():
     global _POST_BATTLE_CALLBACK_ID
+    _cancel_fetch_poll()
     if _POST_BATTLE_CALLBACK_ID is not None:
         try:
             BigWorld.cancelCallback(_POST_BATTLE_CALLBACK_ID)

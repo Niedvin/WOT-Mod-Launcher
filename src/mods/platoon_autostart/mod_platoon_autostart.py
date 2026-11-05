@@ -4,6 +4,7 @@ import json
 import os
 import random
 import time
+import weakref
 import BigWorld
 from constants import PREBATTLE_TYPE
 from debug_utils import LOG_NOTE, LOG_ERROR, LOG_CURRENT_EXCEPTION
@@ -53,10 +54,13 @@ _AUTO_LEAVE_TIMER_ID = None
 _SENT_INVITE_VEH_IDS = set()
 _PENDING_SOLO_INVITES = []
 _SOLO_INVITE_CALLBACK_ID = None
-_LSM_SUBSCRIBED = False
+_LSM_REF = None
+_MEMBERS_CTRL_REF = None
 _VIEW_EVENTS_SUBSCRIBED = False
 _VISIBILITY_TIMER_ID = None
 _WM_EVENTS_SUBSCRIBED = False
+_SAVE_CONFIG_TIMER_ID = None
+_SAVE_CONFIG_DELAY = 1.0
 
 _orig_SetReady_getCooldown = None
 _orig_SetVehicle_getCooldown = None
@@ -125,12 +129,39 @@ def _refresh_config():
 
 def _save_config():
     global _CONFIG_MTIME
+    _cancel_deferred_save()
     try:
         with open(_CONFIG_PATH, 'wb') as fp:
             fp.write(json.dumps(_CONFIG, indent=4))
         _CONFIG_MTIME = os.path.getmtime(_CONFIG_PATH)
     except Exception:
         pass
+
+
+def _cancel_deferred_save():
+    global _SAVE_CONFIG_TIMER_ID
+    if _SAVE_CONFIG_TIMER_ID is not None:
+        try:
+            BigWorld.cancelCallback(_SAVE_CONFIG_TIMER_ID)
+        except Exception:
+            pass
+        _SAVE_CONFIG_TIMER_ID = None
+
+
+def _run_deferred_save():
+    global _SAVE_CONFIG_TIMER_ID
+    _SAVE_CONFIG_TIMER_ID = None
+    _save_config()
+
+
+def _save_config_later():
+    # Window drags call move() for every mouse step; write the final position once instead of per step
+    global _SAVE_CONFIG_TIMER_ID
+    _cancel_deferred_save()
+    try:
+        _SAVE_CONFIG_TIMER_ID = BigWorld.callback(_SAVE_CONFIG_DELAY, _run_deferred_save)
+    except Exception:
+        _save_config()
 
 
 def _init_mods_settings():
@@ -147,10 +178,13 @@ def _init_mods_settings():
             if 'show_system_message' in new_settings:
                 _CONFIG['show_system_message'] = bool(new_settings['show_system_message'])
             if 'auto_start_delay' in new_settings:
-                raw_delay = float(new_settings['auto_start_delay'])
-                if raw_delay <= 30.0:
-                    raw_delay *= 100.0
-                _CONFIG['auto_start_delay'] = round(raw_delay / 1000.0, 2)
+                try:
+                    raw_delay = float(new_settings['auto_start_delay'])
+                    if raw_delay <= 30.0:
+                        raw_delay *= 100.0
+                    _CONFIG['auto_start_delay'] = round(raw_delay / 1000.0, 2)
+                except (TypeError, ValueError):
+                    pass
             _save_config()
 
         delay_ms = int(round(float(_CONFIG.get('auto_start_delay', 0.5)) * 1000))
@@ -980,7 +1014,8 @@ def _update_visibility():
         if busy and _UI_FREE_RETRIES < 5:
             _UI_FREE_RETRIES += 1
             LOG_NOTE('[PlatoonAutoStart] Hangar UI busy (%s), auto-show retry %d' % (busy, _UI_FREE_RETRIES))
-            BigWorld.callback(1.0, _update_visibility)
+            # Shares the debounced timer so view events cannot start parallel retry chains
+            _schedule_visibility_check(1.0)
             return
         if busy:
             LOG_NOTE('[PlatoonAutoStart] Hangar UI still busy (%s), showing anyway' % busy)
@@ -1102,7 +1137,7 @@ def _hooked_MembersWindow_move(self, x, y):
 
     _CONFIG['window_pos_x'] = int(x / scale)
     _CONFIG['window_pos_y'] = int(y / scale)
-    _save_config()
+    _save_config_later()
 
 
 def _on_route_changed(*args, **kwargs):
@@ -1131,31 +1166,72 @@ def _on_platoon_members_update(*args, **kwargs):
     _schedule_visibility_check(0.15)
 
 
+def _deref(ref):
+    return ref() if ref is not None else None
+
+
+def _make_ref(obj):
+    # The reference is taken before subscribing, so a failure here can never leave a handler registered twice
+    try:
+        return weakref.ref(obj)
+    except TypeError:
+        return lambda: obj
+
+
 def _try_subscribe_lsm():
-    global _LSM_SUBSCRIBED
-    if _LSM_SUBSCRIBED:
-        return
+    # Tracks the instance, not a flag: a relogin can bring a new state machine that also needs the handler
+    global _LSM_REF
     try:
         from gui.Scaleform.lobby_entry import getLobbyStateMachine
         lsm = getLobbyStateMachine()
-        if lsm is not None and hasattr(lsm, 'onVisibleRouteChanged'):
-            lsm.onVisibleRouteChanged += _on_route_changed
-            _LSM_SUBSCRIBED = True
-            LOG_NOTE('[PlatoonAutoStart] Subscribed to LSM onVisibleRouteChanged')
+        if lsm is None or not hasattr(lsm, 'onVisibleRouteChanged') or _deref(_LSM_REF) is lsm:
+            return
+        _unsubscribe_lsm()
+        ref = _make_ref(lsm)
+        lsm.onVisibleRouteChanged += _on_route_changed
+        _LSM_REF = ref
+        LOG_NOTE('[PlatoonAutoStart] Subscribed to LSM onVisibleRouteChanged')
     except Exception:
         pass
 
 
 def _unsubscribe_lsm():
-    global _LSM_SUBSCRIBED
-    if not _LSM_SUBSCRIBED:
+    global _LSM_REF
+    lsm = _deref(_LSM_REF)
+    _LSM_REF = None
+    if lsm is None:
         return
     try:
-        from gui.Scaleform.lobby_entry import getLobbyStateMachine
-        lsm = getLobbyStateMachine()
-        if lsm is not None and hasattr(lsm, 'onVisibleRouteChanged'):
-            lsm.onVisibleRouteChanged -= _on_route_changed
-            _LSM_SUBSCRIBED = False
+        lsm.onVisibleRouteChanged -= _on_route_changed
+    except Exception:
+        pass
+
+
+def _subscribe_members_update():
+    # onAccountShowGUI fires after every battle; subscribing each time would stack handlers
+    global _MEMBERS_CTRL_REF
+    try:
+        from helpers import dependency
+        from skeletons.gui.game_control import IPlatoonController
+        platoonCtrl = dependency.instance(IPlatoonController)
+        if platoonCtrl is None or _deref(_MEMBERS_CTRL_REF) is platoonCtrl:
+            return
+        _unsubscribe_members_update()
+        ref = _make_ref(platoonCtrl)
+        platoonCtrl.onMembersUpdate += _on_platoon_members_update
+        _MEMBERS_CTRL_REF = ref
+    except Exception:
+        LOG_CURRENT_EXCEPTION()
+
+
+def _unsubscribe_members_update():
+    global _MEMBERS_CTRL_REF
+    platoonCtrl = _deref(_MEMBERS_CTRL_REF)
+    _MEMBERS_CTRL_REF = None
+    if platoonCtrl is None:
+        return
+    try:
+        platoonCtrl.onMembersUpdate -= _on_platoon_members_update
     except Exception:
         pass
 
@@ -1460,15 +1536,7 @@ def _do_auto_leave_attempt(attempt=1):
 def _on_account_show_gui(*args, **kwargs):
     global _WAS_IN_BATTLE
     _clear_solo_invites()
-    try:
-        from helpers import dependency
-        from skeletons.gui.game_control import IPlatoonController
-        platoonCtrl = dependency.instance(IPlatoonController)
-        if platoonCtrl is not None:
-            platoonCtrl.onMembersUpdate += _on_platoon_members_update
-    except Exception:
-        LOG_CURRENT_EXCEPTION()
-
+    _subscribe_members_update()
     _try_subscribe_lsm()
     _subscribe_windows_manager()
 
@@ -1715,6 +1783,8 @@ def fini():
 
     _clear_solo_invites()
     _cancel_auto_start_timer()
+    if _SAVE_CONFIG_TIMER_ID is not None:
+        _save_config()
     global _AUTO_LEAVE_TIMER_ID, _PENDING_AUTO_LEAVE
     _PENDING_AUTO_LEAVE = False
     if _AUTO_LEAVE_TIMER_ID is not None:
@@ -1749,14 +1819,7 @@ def fini():
     except Exception:
         pass
 
-    try:
-        from helpers import dependency
-        from skeletons.gui.game_control import IPlatoonController
-        platoonCtrl = dependency.instance(IPlatoonController)
-        if platoonCtrl is not None:
-            platoonCtrl.onMembersUpdate -= _on_platoon_members_update
-    except Exception:
-        pass
+    _unsubscribe_members_update()
 
     if _orig_SetReady_getCooldown is not None:
         SetReadyUnitCtx.getCooldown = _orig_SetReady_getCooldown
