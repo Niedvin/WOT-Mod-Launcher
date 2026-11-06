@@ -9,6 +9,7 @@ using System.IO.Compression;
 using System.Net;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -38,19 +39,37 @@ namespace WotModpackInstaller
         public object[] clean_patterns { get; set; }
         public object[] clean_res_mods { get; set; }
         public long size_bytes { get; set; }
+        public long download_bytes { get; set; }
+        public RemoteFile[] remote_files { get; set; }
         public UpdateSource[] updates { get; set; }
         public string FolderPath { get; set; }
+
+        public bool NeedsDownload
+        {
+            get { return remote_files != null && remote_files.Length > 0; }
+        }
 
         public override string ToString()
         {
             string sizeStr;
             if (size_bytes > 1024 * 1024)
-                sizeStr = string.Format("{0:0.1} MB", size_bytes / (1024.0 * 1024.0));
+                sizeStr = string.Format("{0:0.0} MB", size_bytes / (1024.0 * 1024.0));
             else
                 sizeStr = string.Format("{0} KB", Math.Max(1, size_bytes / 1024));
 
-            return string.Format("{0} v{1} ({2})", title, version, sizeStr);
+            return string.Format("{0} v{1} ({2}{3})", title, version, sizeStr, NeedsDownload ? ", з мережі" : "");
         }
+    }
+
+    public class RemoteFile
+    {
+        public string id { get; set; }
+        public string file { get; set; }
+        public string path { get; set; }
+        public string source { get; set; }
+        public string url { get; set; }
+        public string sha256 { get; set; }
+        public long size { get; set; }
     }
 
     public class UpdateSource
@@ -104,6 +123,248 @@ namespace WotModpackInstaller
         void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string ppszFileName);
     }
 
+    internal sealed class RemotePayloadResult
+    {
+        public bool Ok = true;
+        public string Error;
+        public readonly List<string> Lines = new List<string>();
+    }
+
+    internal static class RemotePayload
+    {
+        public const string ManifestUrl = "https://github.com/Niedvin/WOT-Mod-Launcher/releases/latest/download/manifest.json";
+
+        public sealed class Entry
+        {
+            public string file;
+            public string url;
+            public string sha256;
+            public Version version;
+        }
+
+        public static string CacheDir
+        {
+            get { return Path.Combine(MainForm.GetLauncherInstallDir(), "payload_cache"); }
+        }
+
+        public static Dictionary<string, Entry> LoadManifest(Action<string> warn)
+        {
+            var map = new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var json = new JavaScriptSerializer();
+                json.MaxJsonLength = 16 * 1024 * 1024;
+                string body;
+                using (var wc = new WebClient())
+                {
+                    wc.Headers[HttpRequestHeader.UserAgent] = "wot-modpack-installer";
+                    body = wc.DownloadString(ManifestUrl);
+                }
+                var root = json.DeserializeObject(body) as Dictionary<string, object>;
+                if (root == null || !root.ContainsKey("mods")) return map;
+                var mods = root["mods"] as object[];
+                if (mods == null) return map;
+                foreach (Dictionary<string, object> m in mods)
+                {
+                    string id = m.ContainsKey("id") ? m["id"] as string : null;
+                    if (string.IsNullOrEmpty(id)) continue;
+                    var e = new Entry
+                    {
+                        file = m.ContainsKey("file") ? m["file"] as string : null,
+                        url = m.ContainsKey("url") ? m["url"] as string : null,
+                        sha256 = m.ContainsKey("sha256") ? m["sha256"] as string : null,
+                        version = m.ContainsKey("version") ? ParseVersion(m["version"] as string) : null
+                    };
+                    if (string.IsNullOrEmpty(e.url) || string.IsNullOrEmpty(e.sha256)) continue;
+                    Entry old;
+                    if (map.TryGetValue(id, out old) && old.version != null && e.version != null && old.version >= e.version)
+                        continue;
+                    map[id] = e;
+                }
+            }
+            catch (Exception ex)
+            {
+                if (warn != null) warn("Маніфест релізу недоступний (" + MainForm.RootCause(ex) + ") — беру адреси з архіву");
+            }
+            return map;
+        }
+
+        public static RemotePayloadResult Fetch(ModItem mod, Dictionary<string, Entry> manifest, Action<string> status, Action<int> progress)
+        {
+            var result = new RemotePayloadResult();
+            if (mod.remote_files == null || mod.remote_files.Length == 0) return result;
+            Directory.CreateDirectory(CacheDir);
+
+            for (int i = 0; i < mod.remote_files.Length; i++)
+            {
+                RemoteFile rf = mod.remote_files[i];
+                string file = rf.file, url = rf.url, sha = rf.sha256;
+                long size = rf.size;
+                Version baked = ParseVersion(FileVersion(rf.file));
+
+                Entry entry;
+                if (manifest != null && !string.IsNullOrEmpty(rf.id) && manifest.TryGetValue(rf.id, out entry)
+                    && (baked == null || entry.version == null || entry.version >= baked))
+                {
+                    file = entry.file ?? file;
+                    url = entry.url;
+                    sha = entry.sha256;
+                    size = 0;
+                }
+                if (string.IsNullOrEmpty(url) || string.IsNullOrEmpty(sha))
+                {
+                    result.Ok = false;
+                    result.Error = "немає адреси або хеша для " + rf.file;
+                    result.Lines.Add("[FAIL] " + result.Error);
+                    return result;
+                }
+
+                string cache = Path.Combine(CacheDir, sha + ".wotmod");
+                bool cached = File.Exists(cache) && (size <= 0 || new FileInfo(cache).Length == size);
+                if (cached)
+                {
+                    cached = string.Equals(Sha256Of(cache), sha, StringComparison.OrdinalIgnoreCase);
+                    if (!cached)
+                    {
+                        result.Lines.Add("[WARN] Кеш пошкоджено, качаю заново: " + file);
+                        try { File.Delete(cache); } catch { }
+                    }
+                }
+
+                if (!cached)
+                {
+                    if (status != null) status("Завантаження " + mod.title + ": " + file);
+                    string error;
+                    bool done = DownloadTo(url, cache, size, mod.title, status, progress, out error);
+                    if (!done && !string.IsNullOrEmpty(rf.url) && !string.Equals(url, rf.url, StringComparison.OrdinalIgnoreCase))
+                    {
+                        result.Lines.Add("[WARN] " + file + ": " + error + " — пробую архівну адресу");
+                        done = DownloadTo(rf.url, cache, rf.size, mod.title, status, progress, out error);
+                    }
+                    if (!done)
+                    {
+                        result.Ok = false;
+                        result.Error = file + ": " + error;
+                        result.Lines.Add("[FAIL] Не завантажено " + result.Error);
+                        return result;
+                    }
+                    string actual = Sha256Of(cache);
+                    if (!string.Equals(actual, sha, StringComparison.OrdinalIgnoreCase))
+                    {
+                        try { File.Delete(cache); } catch { }
+                        result.Ok = false;
+                        result.Error = "SHA-256 не збігається: " + file;
+                        result.Lines.Add("[FAIL] " + result.Error);
+                        return result;
+                    }
+                }
+
+                string relDir = Path.GetDirectoryName(rf.path.Replace('/', '\\'));
+                string dest = Path.Combine(mod.FolderPath, relDir, file);
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(dest));
+                    if (File.Exists(dest)) File.Delete(dest);
+                    if (!CreateHardLink(dest, cache, IntPtr.Zero))
+                        File.Copy(cache, dest, true);
+                }
+                catch (Exception ex)
+                {
+                    result.Ok = false;
+                    result.Error = "не вдалося підготувати " + file + ": " + MainForm.RootCause(ex);
+                    result.Lines.Add("[FAIL] " + result.Error);
+                    return result;
+                }
+
+                result.Lines.Add(string.Format("[ OK ] {0} — {1:0.0} МБ{2}", file,
+                    new FileInfo(cache).Length / (1024.0 * 1024.0), cached ? " (з кешу)" : ""));
+                if (progress != null) progress((int)((i + 1) * 100.0 / mod.remote_files.Length));
+            }
+            return result;
+        }
+
+        private static bool DownloadTo(string url, string dest, long expectedSize, string label, Action<string> status, Action<int> progress, out string error)
+        {
+            error = null;
+            string tmp = dest + ".part";
+            try
+            {
+                if (File.Exists(tmp)) File.Delete(tmp);
+                if (url.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Copy(new Uri(url).LocalPath, tmp, true);
+                }
+                else
+                {
+                    var req = (HttpWebRequest)WebRequest.Create(url);
+                    req.UserAgent = "wot-modpack-installer";
+                    req.Timeout = 30000;
+                    req.ReadWriteTimeout = 120000;
+                    using (WebResponse resp = req.GetResponse())
+                    using (Stream rs = resp.GetResponseStream())
+                    using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 65536))
+                    {
+                        long total = expectedSize > 0 ? expectedSize : resp.ContentLength;
+                        byte[] buffer = new byte[65536];
+                        long done = 0;
+                        int n, lastPct = -2;
+                        while ((n = rs.Read(buffer, 0, buffer.Length)) > 0)
+                        {
+                            fs.Write(buffer, 0, n);
+                            done += n;
+                            int pct = total > 0 ? (int)(done * 100 / total) : -1;
+                            if (pct != lastPct)
+                            {
+                                lastPct = pct;
+                                if (status != null)
+                                    status(string.Format("Завантаження {0}: {1}% ({2:0} з {3:0} МБ)", label, Math.Max(0, pct),
+                                        done / 1048576.0, total > 0 ? total / 1048576.0 : 0));
+                                if (progress != null && pct >= 0) progress(pct);
+                            }
+                        }
+                    }
+                }
+                if (File.Exists(dest)) File.Delete(dest);
+                File.Move(tmp, dest);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = MainForm.RootCause(ex);
+                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+                return false;
+            }
+        }
+
+        private static string FileVersion(string name)
+        {
+            Match m = Regex.Match(name ?? "", @"_([0-9]+(?:\.[0-9]+)*)\.wotmod$", RegexOptions.IgnoreCase);
+            return m.Success ? m.Groups[1].Value : null;
+        }
+
+        public static Version ParseVersion(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return null;
+            Version v;
+            return Version.TryParse(s.TrimStart('v', 'V'), out v) ? Pad(v) : null;
+        }
+
+        private static Version Pad(Version v)
+        {
+            return new Version(v.Major, v.Minor, Math.Max(v.Build, 0), Math.Max(v.Revision, 0));
+        }
+
+        public static string Sha256Of(string path)
+        {
+            using (var sha = SHA256.Create())
+            using (var fs = File.OpenRead(path))
+                return BitConverter.ToString(sha.ComputeHash(fs)).Replace("-", "").ToLowerInvariant();
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool CreateHardLink(string lpFileName, string lpExistingFileName, IntPtr lpSecurityAttributes);
+    }
+
     public class MainForm : Form
     {
         private Panel headerPanel;
@@ -128,6 +389,7 @@ namespace WotModpackInstaller
         private SectionPanel grpOptions;
         private CheckBox chkCleanOld;
         private CheckBox chkBackup;
+        private CheckBox chkRemoveUnselected;
         private CheckBox chkInstallLauncher;
         private CheckBox chkHijackShortcuts;
 
@@ -244,8 +506,8 @@ namespace WotModpackInstaller
             grpMods.Size = new Size(824, 242);
 
             lblModCounter = new Label();
-            lblModCounter.Location = new Point(520, 8);
-            lblModCounter.Size = new Size(290, 18);
+            lblModCounter.Location = new Point(470, 8);
+            lblModCounter.Size = new Size(340, 18);
             lblModCounter.TextAlign = ContentAlignment.MiddleRight;
             lblModCounter.ForeColor = Color.FromArgb(229, 160, 40);
             lblModCounter.Font = new Font("Segoe UI", 9F, FontStyle.Bold, GraphicsUnit.Point);
@@ -336,6 +598,13 @@ namespace WotModpackInstaller
             chkBackup.Checked = true;
             chkBackup.ForeColor = Color.FromArgb(233, 237, 245);
 
+            chkRemoveUnselected = new CheckBox();
+            chkRemoveUnselected.Text = "Видаляти зняті моди з гри";
+            chkRemoveUnselected.Location = new Point(648, 34);
+            chkRemoveUnselected.AutoSize = true;
+            chkRemoveUnselected.Checked = true;
+            chkRemoveUnselected.ForeColor = Color.FromArgb(233, 237, 245);
+
             chkInstallLauncher = new CheckBox();
             chkInstallLauncher.Text = "Встановити лаунчер автооновлення";
             chkInstallLauncher.Location = new Point(14, 68);
@@ -353,6 +622,7 @@ namespace WotModpackInstaller
 
             grpOptions.Controls.Add(chkCleanOld);
             grpOptions.Controls.Add(chkBackup);
+            grpOptions.Controls.Add(chkRemoveUnselected);
             grpOptions.Controls.Add(chkInstallLauncher);
             grpOptions.Controls.Add(chkHijackShortcuts);
             this.Controls.Add(grpOptions);
@@ -445,16 +715,21 @@ namespace WotModpackInstaller
         private void UpdateModCounter()
         {
             int count = 0;
-            long bytes = 0;
+            long bytes = 0, net = 0;
             for (int i = 0; i < chkListMods.Items.Count; i++)
             {
                 if (chkListMods.GetItemChecked(i))
                 {
                     count++;
-                    bytes += ((ModItem)chkListMods.Items[i]).size_bytes;
+                    ModItem item = (ModItem)chkListMods.Items[i];
+                    bytes += item.size_bytes;
+                    if (item.NeedsDownload) net += item.download_bytes;
                 }
             }
-            lblModCounter.Text = string.Format("Вибрано: {0} з {1}  •  {2:0.0} МБ", count, chkListMods.Items.Count, bytes / (1024.0 * 1024.0));
+            lblModCounter.Text = net > 0
+                ? string.Format("Вибрано: {0} з {1}  •  {2:0.0} МБ  •  з мережі {3:0.0} МБ",
+                    count, chkListMods.Items.Count, bytes / (1024.0 * 1024.0), net / (1024.0 * 1024.0))
+                : string.Format("Вибрано: {0} з {1}  •  {2:0.0} МБ", count, chkListMods.Items.Count, bytes / (1024.0 * 1024.0));
         }
 
         private class SectionPanel : Panel
@@ -584,6 +859,7 @@ namespace WotModpackInstaller
             bool state;
             if (savedSettings.options.TryGetValue("clean_old", out state)) chkCleanOld.Checked = state;
             if (savedSettings.options.TryGetValue("backup", out state)) chkBackup.Checked = state;
+            if (savedSettings.options.TryGetValue("remove_unselected", out state)) chkRemoveUnselected.Checked = state;
             if (savedSettings.options.TryGetValue("install_launcher", out state)) chkInstallLauncher.Checked = state;
             if (savedSettings.options.TryGetValue("hijack_shortcuts", out state)) chkHijackShortcuts.Checked = state;
             chkHijackShortcuts.Enabled = chkInstallLauncher.Checked;
@@ -604,6 +880,7 @@ namespace WotModpackInstaller
                 {
                     { "clean_old", chkCleanOld.Checked },
                     { "backup", chkBackup.Checked },
+                    { "remove_unselected", chkRemoveUnselected.Checked },
                     { "install_launcher", chkInstallLauncher.Checked },
                     { "hijack_shortcuts", chkHijackShortcuts.Checked }
                 };
@@ -697,7 +974,10 @@ namespace WotModpackInstaller
             if (item != null)
             {
                 lblModDetailsTitle.Text = item.title;
-                lblModDetailsMeta.Text = string.Format("Версія: {0}  |  Автор: {1}", item.version, item.author);
+                lblModDetailsMeta.Text = item.NeedsDownload
+                    ? string.Format("Версія: {0}  |  Автор: {1}  |  Завантаження: {2:0.0} МБ",
+                        item.version, item.author, item.download_bytes / (1024.0 * 1024.0))
+                    : string.Format("Версія: {0}  |  Автор: {1}", item.version, item.author);
                 txtModDescription.Text = item.description;
             }
         }
@@ -1173,15 +1453,15 @@ namespace WotModpackInstaller
 
             bool installLauncher = chkInstallLauncher.Checked;
             bool hijackShortcuts = chkHijackShortcuts.Checked;
-            Thread worker = new Thread(() => RunInstallation(gamePath, selected, chkCleanOld.Checked, chkBackup.Checked, installLauncher, hijackShortcuts));
+            Thread worker = new Thread(() => RunInstallation(gamePath, selected, chkCleanOld.Checked, chkRemoveUnselected.Checked, chkBackup.Checked, installLauncher, hijackShortcuts));
             worker.IsBackground = true;
             worker.Start();
         }
 
-        private void RunInstallation(string gamePath, List<ModItem> mods, bool cleanOld, bool doBackup, bool installLauncher, bool hijackShortcuts)
+        private void RunInstallation(string gamePath, List<ModItem> mods, bool cleanOld, bool removeUnselected, bool doBackup, bool installLauncher, bool hijackShortcuts)
         {
             Stopwatch watch = Stopwatch.StartNew();
-            int copied = 0, failedFiles = 0, cleaned = 0, backedUp = 0, modsDone = 0;
+            int copied = 0, failedFiles = 0, cleaned = 0, backedUp = 0, modsDone = 0, unselectedRemoved = 0;
             try
             {
                 if (!prefetchDone.WaitOne(0))
@@ -1196,9 +1476,34 @@ namespace WotModpackInstaller
                 Log("Шлях до гри: " + gamePath);
                 Log("Версія гри: " + detectedGameVersion);
                 Log("Джерело модів: " + modsRootPath);
-                Log(string.Format("Опції: очищення={0}, бекап={1}, лаунчер={2}, ярлики={3}",
-                    OnOff(cleanOld), OnOff(doBackup), OnOff(installLauncher), OnOff(hijackShortcuts)));
+                Log(string.Format("Опції: очищення={0}, зняті моди={1}, бекап={2}, лаунчер={3}, ярлики={4}",
+                    OnOff(cleanOld), OnOff(removeUnselected), OnOff(doBackup), OnOff(installLauncher), OnOff(hijackShortcuts)));
                 Log(string.Format("Модів до встановлення: {0}", mods.Count));
+
+                var failedDownloads = new HashSet<ModItem>();
+                List<ModItem> remoteMods = mods.FindAll(m => m.NeedsDownload);
+                if (remoteMods.Count > 0)
+                {
+                    UpdateStatus("Перевірка джерел завантаження...");
+                    Dictionary<string, RemotePayload.Entry> manifest = RemotePayload.LoadManifest(LogWarn);
+                    if (manifest.Count > 0)
+                        LogOk(string.Format("[Завантаження] Маніфест релізу: пакетів {0}", manifest.Count));
+
+                    foreach (var mod in remoteMods)
+                    {
+                        Log(string.Format("--- Завантаження {0}: файлів {1}, {2:0.0} МБ ---",
+                            mod.title, mod.remote_files.Length, mod.download_bytes / (1024.0 * 1024.0)));
+                        RemotePayloadResult res = RemotePayload.Fetch(mod, manifest, UpdateStatus, UpdateProgress);
+                        foreach (string line in res.Lines) Log(line);
+                        if (!res.Ok)
+                        {
+                            failedDownloads.Add(mod);
+                            LogFail(string.Format("Мод пропускається: {0} — {1}", mod.title, res.Error));
+                        }
+                    }
+                    UpdateProgress(0);
+                    UpdateStatus("Початок встановлення...");
+                }
 
                 string backupDir = "";
                 if (doBackup)
@@ -1234,8 +1539,41 @@ namespace WotModpackInstaller
                     LogWarn("Бекап вимкнено — попередні файли не зберігаються");
                 }
 
-                int totalSteps = mods.Count * 2;
+                List<ModItem> staleMods = removeUnselected ? GetUnselectedMods(mods) : new List<ModItem>();
+
+                int totalSteps = mods.Count * 2 + staleMods.Count;
                 int currentStep = 0;
+
+                if (removeUnselected)
+                {
+                    if (staleMods.Count == 0)
+                        Log("Знятих модів, які треба прибрати з гри, не знайдено");
+                    foreach (var mod in staleMods)
+                    {
+                        UpdateStatus("Прибирання знятого моду: " + mod.title);
+                        Log(string.Format("--- Прибирання знятого моду: {0} v{1} ---", mod.title, mod.version));
+                        int[] clean = CleanModOldVersions(gamePath, mod, backupDir);
+                        cleaned += clean[0];
+                        backedUp += clean[1];
+                        if (clean[0] > 0)
+                        {
+                            unselectedRemoved++;
+                            LogOk(string.Format("    прибрано файлів {0}, у бекап {1}", clean[0], clean[1]));
+                        }
+                        else
+                        {
+                            Log("    локальних файлів не знайдено");
+                        }
+
+                        currentStep++;
+                        UpdateProgress((int)((currentStep / (double)totalSteps) * 100));
+                    }
+                }
+                else
+                {
+                    LogWarn("Зняті моди не видаляються (галочку знято)");
+                }
+
                 int index = 0;
 
                 foreach (var mod in mods)
@@ -1245,6 +1583,14 @@ namespace WotModpackInstaller
                     Log(string.Format("--- [{0}/{1}] {2} v{3}{4} ---", index, mods.Count, mod.title, mod.version,
                         mod.required ? " (системний)" : ""));
                     Log("    джерело: " + mod.FolderPath);
+
+                    if (failedDownloads.Contains(mod))
+                    {
+                        LogWarn("    пропущено: файли не завантажено");
+                        currentStep += 2;
+                        UpdateProgress((int)((currentStep / (double)totalSteps) * 100));
+                        continue;
+                    }
 
                     if (cleanOld)
                     {
@@ -1305,18 +1651,26 @@ namespace WotModpackInstaller
                 }
 
                 UpdateProgress(100);
-                UpdateStatus(failedFiles == 0
+                int skippedMods = failedDownloads.Count;
+                UpdateStatus(failedFiles == 0 && skippedMods == 0
                     ? "Встановлення успішно завершено!"
-                    : string.Format("Завершено з попередженнями: не скопійовано файлів {0}", failedFiles));
-                Log(string.Format("=== ГОТОВО: модів {0}, файлів {1}, помилок {2}, прибрано старих {3}, у бекап {4}, час {5:0.0} с ===",
-                    modsDone, copied, failedFiles, cleaned, backedUp, watch.Elapsed.TotalSeconds));
+                    : string.Format("Завершено з попередженнями: не скопійовано файлів {0}, пропущено модів {1}", failedFiles, skippedMods));
+                Log(string.Format("=== ГОТОВО: модів {0}, файлів {1}, помилок {2}, прибрано старих {3}, знятих модів {4}, у бекап {5}, час {6:0.0} с ===",
+                    modsDone, copied, failedFiles, cleaned, unselectedRemoved, backedUp, watch.Elapsed.TotalSeconds));
                 if (failedFiles == 0) LogOk("Помилок копіювання немає");
                 else LogWarn(string.Format("Не скопійовано файлів: {0} — перевірте рядки [FAIL] вище", failedFiles));
                 Log("Повний лог: " + LogFilePath);
 
-                bool hasErrors = failedFiles > 0;
+                bool hasErrors = failedFiles > 0 || skippedMods > 0;
                 string box = string.Format("Моди встановлені у World of Tanks!\nМодифікацій: {0}\nВерсія гри: {1}",
-                    mods.Count, detectedGameVersion);
+                    mods.Count - skippedMods, detectedGameVersion);
+                if (skippedMods > 0)
+                {
+                    var names = new List<string>();
+                    foreach (var m in failedDownloads) names.Add(m.title);
+                    box += string.Format("\n\nНе встановлено (не завантажилися): {0}.\nПеревірте інтернет і запустіть інсталятор ще раз — решта модів уже на місці.",
+                        string.Join(", ", names.ToArray()));
+                }
                 if (hasErrors)
                     box += string.Format("\n\nНе скопійовано файлів: {0}.\nПодробиці — кнопка «Лог файл».", failedFiles);
 
@@ -1355,6 +1709,21 @@ namespace WotModpackInstaller
             {
                 watch.Stop();
             }
+        }
+
+        internal List<ModItem> GetUnselectedMods(List<ModItem> selected)
+        {
+            var selectedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var mod in selected)
+                if (!string.IsNullOrEmpty(mod.id)) selectedIds.Add(mod.id);
+
+            var stale = new List<ModItem>();
+            foreach (var mod in loadedMods)
+            {
+                if (mod.required || string.IsNullOrEmpty(mod.id) || selectedIds.Contains(mod.id)) continue;
+                stale.Add(mod);
+            }
+            return stale;
         }
 
         internal int[] CleanModOldVersions(string gamePath, ModItem mod, string backupDir)
@@ -1556,7 +1925,7 @@ namespace WotModpackInstaller
                 }
 
                 string relNorm = rel.Replace('/', '\\');
-                if (File.Exists(destPath) && relNorm.StartsWith(@"mods\configs\net.openwg", StringComparison.OrdinalIgnoreCase))
+                if (File.Exists(destPath) && IsUserSettingsFile(relNorm))
                 {
                     Log("    збережено налаштування користувача: " + rel);
                     continue;
@@ -1578,6 +1947,14 @@ namespace WotModpackInstaller
             }
 
             return new int[] { copied, failed, backed };
+        }
+
+        private static bool IsUserSettingsFile(string relPath)
+        {
+            if (relPath.StartsWith(@"mods\configs\net.openwg", StringComparison.OrdinalIgnoreCase))
+                return true;
+            return relPath.StartsWith(@"mods\configs\", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(Path.GetExtension(relPath), ".json", StringComparison.OrdinalIgnoreCase);
         }
 
         internal static string GetLauncherInstallDir()
@@ -2282,13 +2659,17 @@ namespace WotModpackInstaller
                 Environment.Exit(RunSelfTest());
                 return;
             }
+            if (args != null && args.Length > 0 && Array.IndexOf(args, "--selftest-remote") >= 0)
+            {
+                Environment.Exit(RunSelfTestRemote(args));
+                return;
+            }
             Application.Run(new MainForm());
         }
 
         private static int RunSelfTest()
         {
-            string report = Path.Combine(Path.GetTempPath(), "wot_setup_selftest.txt");
-            try
+            string report = Path.Combine(Path.GetTempPath(), "wot_setup_selftest.txt");            try
             {
                 string dir = ExtractEmbeddedPayload();
                 if (dir == null)
@@ -2309,6 +2690,81 @@ namespace WotModpackInstaller
             {
                 File.WriteAllText(report, "FAIL: " + ex.Message);
                 return 3;
+            }
+        }
+
+        private static int RunSelfTestRemote(string[] args)
+        {
+            string report = Path.Combine(Path.GetTempPath(), "wot_remote_selftest.txt");
+            var lines = new List<string>();
+            try
+            {
+                int idx = Array.IndexOf(args, "--selftest-remote");
+                string modsRoot = args[idx + 1];
+                string gameDir = args[idx + 2];
+                string gameVer = args.Length > idx + 3 && !args[idx + 3].StartsWith("--") ? args[idx + 3] : "2.4.1.1";
+                bool offline = Array.IndexOf(args, "--offline") >= 0;
+
+                var json = new JavaScriptSerializer();
+                var mods = new List<ModItem>();
+                foreach (string dir in Directory.GetDirectories(modsRoot))
+                {
+                    string info = Path.Combine(dir, "info.json");
+                    if (!File.Exists(info)) continue;
+                    ModItem item = json.Deserialize<ModItem>(File.ReadAllText(info, Encoding.UTF8));
+                    item.FolderPath = dir;
+                    if (item.NeedsDownload) mods.Add(item);
+                }
+                lines.Add("remote mods: " + mods.Count);
+
+                Dictionary<string, RemotePayload.Entry> manifest = offline
+                    ? new Dictionary<string, RemotePayload.Entry>(StringComparer.OrdinalIgnoreCase)
+                    : RemotePayload.LoadManifest(s => lines.Add("[WARN] " + s));
+
+                int failures = 0;
+                foreach (ModItem mod in mods)
+                {
+                    RemotePayloadResult res = RemotePayload.Fetch(mod, manifest, null, null);
+                    lines.AddRange(res.Lines);
+                    if (!res.Ok) { failures++; continue; }
+
+                    string srcRoot = Path.Combine(mod.FolderPath, "game_files");
+                    foreach (string f in Directory.GetFiles(srcRoot, "*", SearchOption.AllDirectories))
+                    {
+                        string rel = f.Substring(srcRoot.Length).TrimStart('\\', '/').Replace("_VERSION_", gameVer);
+                        string dst = Path.Combine(gameDir, rel);
+                        Directory.CreateDirectory(Path.GetDirectoryName(dst));
+                        File.Copy(f, dst, true);
+                        lines.Add("installed " + rel);
+                    }
+
+                    foreach (RemoteFile rf in mod.remote_files)
+                    {
+                        string rel = rf.path.Replace('/', '\\').Replace("_VERSION_", gameVer);
+                        if (rel.StartsWith("game_files\\", StringComparison.OrdinalIgnoreCase))
+                            rel = rel.Substring("game_files\\".Length);
+                        string placed = Path.Combine(gameDir, Path.GetDirectoryName(rel), rf.file);
+                        if (!File.Exists(placed))
+                        {
+                            lines.Add("[FAIL] missing after install: " + rf.file);
+                            failures++;
+                            continue;
+                        }
+                        string sha = RemotePayload.Sha256Of(placed);
+                        bool ok = string.Equals(sha, rf.sha256, StringComparison.OrdinalIgnoreCase);
+                        lines.Add((ok ? "[ OK ] verify " : "[FAIL] verify ") + rf.file + " " + sha);
+                        if (!ok) failures++;
+                    }
+                }
+                lines.Add(failures == 0 ? "RESULT: OK" : "RESULT: FAIL " + failures);
+                File.WriteAllLines(report, lines.ToArray(), new UTF8Encoding(false));
+                return failures == 0 ? 0 : 1;
+            }
+            catch (Exception ex)
+            {
+                lines.Add("RESULT: FAIL " + ex);
+                File.WriteAllLines(report, lines.ToArray(), new UTF8Encoding(false));
+                return 2;
             }
         }
 

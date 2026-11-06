@@ -12,7 +12,8 @@
 3. якщо оновлень немає або немає інтернету — одразу запускає `WorldOfTanks.exe`, без зайвих вікон;
 4. якщо оновлення є — показує вікно зі списком змін та кнопками «Оновити і грати» / «Грати без оновлення»;
 5. кожен пакет перевіряється за SHA-256, розміром і `meta.xml` (`<id>`); перед заміною створюється бекап у `<гра>\.backups\launcher\`, при збої старі файли відновлюються;
-6. лаунчер також вміє оновлювати сам себе та переносити моди в нову папку версії гри після патчу клієнта.
+6. після запуску гри лаунчер тихо, без вікон, завантажує власне оновлення у фоні та підміняє свій exe; наступний запуск іде вже з новою версією. Якщо підмінити файл не вдалося, новий exe застосовується під час наступного старту;
+7. переносить моди в нову папку версії гри після патчу клієнта.
 
 ## Склад модпаку (реліз 2026.11.01, клієнт 2.4.1.1)
 
@@ -31,8 +32,19 @@
 
 ## Завантаження
 
-Остання збірка: [releases/latest](https://github.com/Niedvin/WOT-Mod-Launcher/releases/latest) —
-`WoT_Modpack_by_Niedvin.zip` (інсталятор + лаунчер + моди + README). Розархівуйте у будь-яку теку і запустіть `Installer.exe`.
+Остання збірка: [releases/latest](https://github.com/Niedvin/WOT-Mod-Launcher/releases/latest)
+
+- `WoT_Modpack_by_Niedvin_Setup.exe` — один саморозпаковний файл: запустіть, нічого розпаковувати не треба.
+- `WoT_Modpack_by_Niedvin.zip` — архів з `Installer.exe`, лаунчером і модами.
+
+## Пакети на вимогу
+
+Інсталятор важить ~1.2 МБ: важкі пакети GPU Boost (`net.openwg.common`, `net.openwg.gpu.upscaler`, `net.openwg.gpu.upscaler.xess`, разом ~167 МБ) у дистрибутив не входять.
+
+- Завантажуються з GitHub лише тоді, коли в інсталяторі позначено мод **GPU Boost**; без позначки не качається нічого.
+- Кожен файл звіряється за SHA-256, копія кешується в `%LOCALAPPDATA%\WotModpack\payload_cache` і повторно не завантажується.
+- Версія береться з `manifest.json` останнього релізу; якщо мережі немає, решта модів встановлюється, а GPU Boost пропускається з повідомленням у лозі.
+- Ті самі `.wotmod` лежать у релізі окремими ассетами, тож лаунчер автооновлення працює з ними без змін.
 
 ## Схема manifest.json
 
@@ -41,7 +53,7 @@
   "schema": 1,
   "pack_version": "2026.11.01",
   "game_version": "2.4.1.1",
-  "launcher": { "version": "1.1.0", "url": ".../WotModLauncher.exe", "sha256": "..." },
+  "launcher": { "version": "1.2.0.0", "url": ".../WotModLauncher.exe", "sha256": "..." },
   "mods": [
     { "id": "ua.server_online_autoconnect", "title": "Smart Server",
       "version": "1.1.2", "file": "ua.server_online_autoconnect_1.1.2.wotmod",
@@ -60,6 +72,8 @@
 | `src/publish_release.py` | генерація `manifest.json` та папки ассетів `build/release_assets/` для нового релізу |
 
 Новий реліз: тег `pack-YYYY.MM.DD`, ассети — усе з `build/release_assets/` (усі `.wotmod`, `WotModLauncher.exe`, `manifest.json`, `WoT_Modpack_by_Niedvin.zip`).
+
+Версія лаунчера в `manifest.json` береться з `AssemblyFileVersion` зібраного exe. Перед кожним релізом піднімайте `AssemblyFileVersion` і `AssemblyVersion` у `src/WotModLauncher.cs`, інакше встановлені лаунчери не побачать нову версію.
 
 Автор: **Niedvin** (2026)
 

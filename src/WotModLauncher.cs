@@ -21,8 +21,8 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("Niedvin")]
 [assembly: AssemblyProduct("WoT Modpack by Niedvin")]
 [assembly: AssemblyCopyright("Copyright © 2026 Niedvin")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
-[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.2.0.0")]
+[assembly: AssemblyVersion("1.2.0.0")]
 
 namespace WotModLauncher
 {
@@ -77,6 +77,13 @@ namespace WotModLauncher
         public string sha256 { get; set; }
     }
 
+    public class SelfUpdateState
+    {
+        public string version { get; set; }
+        public string url { get; set; }
+        public string sha256 { get; set; }
+    }
+
     public class ManifestModEntry
     {
         public string id { get; set; }
@@ -112,7 +119,7 @@ namespace WotModLauncher
         public const string RepoOwner = "Niedvin";
         public const string RepoName = "WOT-Mod-Launcher";
         public const string ManifestUrl = "https://github.com/Niedvin/WOT-Mod-Launcher/releases/latest/download/manifest.json";
-        public const string LauncherVersion = "1.1.0";
+        public static readonly string LauncherVersion = Assembly.GetExecutingAssembly().GetName().Version.ToString();
         public static string ManifestOverride;
         public static string ManifestLocalDir;
 
@@ -121,26 +128,43 @@ namespace WotModLauncher
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WotModpack"); }
         }
 
+        private static string CurrentExePath
+        {
+            get { return Assembly.GetExecutingAssembly().Location; }
+        }
+
+        private static string SelfUpdateStatePath
+        {
+            get { return CurrentExePath + ".selfupdate.json"; }
+        }
+
         [STAThread]
         public static int Main(string[] args)
         {
             // .NET 4.0 defaults to TLS 1.0 which GitHub drops — 2026-10-24
             ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
-
-            CleanupSelfUpdateOldBinary();
 
             bool checkOnly = false;
             bool updateOnly = false;
+            bool selfUpdateMode = false;
             string argGamePath = null;
             for (int i = 0; i < args.Length; i++)
             {
                 if (args[i] == "--check-only") checkOnly = true;
                 else if (args[i] == "--update-only") updateOnly = true;
+                else if (args[i] == "--self-update") selfUpdateMode = true;
                 else if (args[i] == "--game" && i + 1 < args.Length) argGamePath = args[++i];
                 else if (args[i] == "--manifest" && i + 1 < args.Length) ManifestOverride = args[++i];
             }
+
+            if (selfUpdateMode)
+                return RunSelfUpdate();
+
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+
+            ApplyPendingSelfUpdate();
+            CleanupSelfUpdateOldBinary();
 
             if (!checkOnly && IsGameAlreadyRunning())
                 return 0;
@@ -163,11 +187,11 @@ namespace WotModLauncher
             if (!string.IsNullOrEmpty(gameVer))
                 SyncVersionFolderIfEmpty(cfg.game_path, gameVer);
 
+            SelfUpdateState selfUpdatePlan = null;
             ManifestRoot manifest = FetchManifestWithTimeout(4000);
             if (manifest != null)
             {
-                if (!checkOnly)
-                    TryStageSelfUpdate(manifest.launcher);
+                selfUpdatePlan = GetSelfUpdatePlan(manifest.launcher);
                 List<PendingModUpdate> updates = FindPendingUpdates(cfg.game_path, gameVer, manifest);
                 if (updates.Count > 0 && !checkOnly)
                 {
@@ -177,9 +201,15 @@ namespace WotModLauncher
                     }
                 }
             }
+            if (selfUpdatePlan == null && !checkOnly && !updateOnly)
+                selfUpdatePlan = LoadPendingUpdateState();
 
             if (!checkOnly && !updateOnly)
+            {
                 LaunchGame(cfg.game_path);
+                if (selfUpdatePlan != null)
+                    StartBackgroundSelfUpdate(selfUpdatePlan);
+            }
 
             return 0;
         }
@@ -188,9 +218,12 @@ namespace WotModLauncher
         {
             try
             {
-                string exe = Assembly.GetExecutingAssembly().Location;
+                string exe = CurrentExePath;
                 string oldFile = exe + ".old";
                 if (File.Exists(oldFile)) File.Delete(oldFile);
+                string dir = Path.GetDirectoryName(exe);
+                foreach (string stale in Directory.GetFiles(dir, Path.GetFileName(exe) + ".new.*.tmp"))
+                    TryDeleteFile(stale);
             }
             catch { }
         }
@@ -356,47 +389,266 @@ namespace WotModLauncher
             }
         }
 
-        private static void TryStageSelfUpdate(ManifestLauncherInfo info)
+        private static SelfUpdateState GetSelfUpdatePlan(ManifestLauncherInfo info)
         {
             if (info == null || string.IsNullOrEmpty(info.version) || string.IsNullOrEmpty(info.url))
-                return;
+                return null;
+
+            Version curV = Quad(ParseVer(LauncherVersion));
+            Version remV = Quad(ParseVer(info.version));
+            if (curV == null || remV == null || remV <= curV) return null;
+
+            string url = info.url;
+            string localSrc = ResolveLocalUrl(url);
+            if (localSrc != null) url = localSrc;
+
+            return new SelfUpdateState { version = remV.ToString(), url = url, sha256 = info.sha256 };
+        }
+
+        private static SelfUpdateState LoadSelfUpdateState()
+        {
             try
             {
-                Version curV = ParseVer(LauncherVersion);
-                Version remV = ParseVer(info.version);
-                if (curV == null || remV == null || remV <= curV) return;
+                if (!File.Exists(SelfUpdateStatePath)) return null;
+                var ser = new JavaScriptSerializer();
+                return ser.Deserialize<SelfUpdateState>(File.ReadAllText(SelfUpdateStatePath, Encoding.UTF8));
+            }
+            catch { return null; }
+        }
 
-                string exe = Assembly.GetExecutingAssembly().Location;
-                string tmp = exe + ".new";
-                string localSrc = ResolveLocalUrl(info.url);
-                if (localSrc != null)
+        private static SelfUpdateState LoadPendingUpdateState()
+        {
+            SelfUpdateState state = LoadSelfUpdateState();
+            if (state == null || string.IsNullOrEmpty(state.version) || string.IsNullOrEmpty(state.url))
+                return null;
+            Version curV = Quad(ParseVer(LauncherVersion));
+            Version remV = Quad(ParseVer(state.version));
+            if (curV == null || remV == null || remV <= curV) return null;
+            return state;
+        }
+
+        private static void StartBackgroundSelfUpdate(SelfUpdateState plan)
+        {
+            try
+            {
+                var ser = new JavaScriptSerializer();
+                File.WriteAllText(SelfUpdateStatePath, ser.Serialize(plan), new UTF8Encoding(false));
+                string exe = CurrentExePath;
+                ProcessStartInfo psi = new ProcessStartInfo
                 {
-                    File.Copy(localSrc, tmp, true);
+                    FileName = exe,
+                    Arguments = "--self-update",
+                    WorkingDirectory = Path.GetDirectoryName(exe),
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
+                Process.Start(psi);
+                LogSelfUpdate("background update to " + plan.version + " started");
+            }
+            catch (Exception ex)
+            {
+                LogSelfUpdate("cannot start background update: " + ex.Message);
+            }
+        }
+
+        private static int RunSelfUpdate()
+        {
+            Mutex mutex = null;
+            bool lockTaken = false;
+            try
+            {
+                mutex = new Mutex(false, @"Local\WotModpackLauncherSelfUpdate");
+                try { lockTaken = mutex.WaitOne(0); }
+                catch (AbandonedMutexException) { lockTaken = true; }
+                if (!lockTaken) return 0;
+
+                SelfUpdateState state = LoadSelfUpdateState();
+                if (state == null || string.IsNullOrEmpty(state.version) || string.IsNullOrEmpty(state.url))
+                    return 0;
+
+                Version curV = Quad(ParseVer(LauncherVersion));
+                Version remV = Quad(ParseVer(state.version));
+                if (curV == null || remV == null || remV <= curV)
+                {
+                    TryDeleteFile(SelfUpdateStatePath);
+                    return 0;
                 }
-                else
+
+                string exe = CurrentExePath;
+                string tmp = exe + ".new." + Guid.NewGuid().ToString("N") + ".tmp";
+                string newPath = exe + ".new";
+                try
                 {
-                    HttpWebRequest req = (HttpWebRequest)WebRequest.Create(info.url);
-                    req.UserAgent = "WotModLauncher/" + LauncherVersion;
-                    req.Timeout = 8000;
-                    req.ReadWriteTimeout = 8000;
-                    using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
-                    using (Stream s = resp.GetResponseStream())
-                    using (FileStream fs = File.Create(tmp))
-                    {
-                        s.CopyTo(fs);
-                    }
+                    string localSrc = ResolveLocalUrl(state.url);
+                    if (localSrc != null)
+                        File.Copy(localSrc, tmp, true);
+                    else
+                        DownloadLauncherFile(AddCacheBuster(state.url), tmp);
+
+                    if (!string.IsNullOrEmpty(state.sha256) && !VerifySha256(tmp, state.sha256))
+                        throw new InvalidDataException("SHA-256 mismatch");
+                    Version fileV = Quad(GetExeVersion(tmp));
+                    if (fileV == null || fileV < remV)
+                        throw new InvalidDataException("downloaded launcher version " + (fileV == null ? "unknown" : fileV.ToString()) + " is older than " + remV);
+
+                    TryDeleteFile(newPath);
+                    File.Move(tmp, newPath);
                 }
-                if (!string.IsNullOrEmpty(info.sha256) && !VerifySha256(tmp, info.sha256))
+                catch (Exception ex)
                 {
-                    File.Delete(tmp);
+                    TryDeleteFile(tmp);
+                    LogSelfUpdate("download failed: " + ex.Message);
+                    return 1;
+                }
+
+                if (!TrySwapLauncher(exe, newPath))
+                {
+                    LogSelfUpdate("swap deferred to next start");
+                    return 1;
+                }
+
+                TryDeleteFile(SelfUpdateStatePath);
+                LogSelfUpdate("launcher updated to " + remV + ", next start uses it");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                LogSelfUpdate("self-update failed: " + ex.Message);
+                return 1;
+            }
+            finally
+            {
+                if (lockTaken)
+                {
+                    try { mutex.ReleaseMutex(); } catch { }
+                }
+                if (mutex != null)
+                {
+                    try { mutex.Close(); } catch { }
+                }
+            }
+        }
+
+        private static void ApplyPendingSelfUpdate()
+        {
+            try
+            {
+                string exe = CurrentExePath;
+                string newPath = exe + ".new";
+                if (!File.Exists(newPath)) return;
+
+                Version newV = Quad(GetExeVersion(newPath));
+                Version curV = Quad(GetExeVersion(exe)) ?? Quad(ParseVer(LauncherVersion));
+                if (newV == null || (curV != null && newV <= curV))
+                {
+                    TryDeleteFile(newPath);
                     return;
                 }
-                string oldPath = exe + ".old";
+
+                SelfUpdateState state = LoadSelfUpdateState();
+                if (state != null && !string.IsNullOrEmpty(state.sha256) && !VerifySha256(newPath, state.sha256))
+                {
+                    TryDeleteFile(newPath);
+                    LogSelfUpdate("pending launcher hash mismatch, discarded");
+                    return;
+                }
+
+                if (TrySwapLauncher(exe, newPath))
+                {
+                    TryDeleteFile(SelfUpdateStatePath);
+                    LogSelfUpdate("applied pending launcher " + newV);
+                }
+            }
+            catch (Exception ex)
+            {
+                LogSelfUpdate("apply pending failed: " + ex.Message);
+            }
+        }
+
+        private static bool TrySwapLauncher(string exe, string newPath)
+        {
+            string oldPath = exe + ".old";
+            try
+            {
                 if (File.Exists(oldPath)) File.Delete(oldPath);
                 File.Move(exe, oldPath);
-                File.Move(tmp, exe);
+            }
+            catch (Exception ex)
+            {
+                LogSelfUpdate("rename current exe failed: " + ex.Message);
+                return false;
+            }
+
+            try
+            {
+                File.Move(newPath, exe);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogSelfUpdate("place new exe failed: " + ex.Message);
+                try
+                {
+                    if (!File.Exists(exe)) File.Copy(oldPath, exe, true);
+                }
+                catch { }
+                return false;
+            }
+        }
+
+        private static void DownloadLauncherFile(string url, string dst)
+        {
+            HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
+            req.UserAgent = "WotModLauncher/" + LauncherVersion;
+            req.Timeout = 20000;
+            req.ReadWriteTimeout = 20000;
+            req.AllowAutoRedirect = true;
+            using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
+            using (Stream s = resp.GetResponseStream())
+            using (FileStream fs = File.Create(dst))
+            {
+                s.CopyTo(fs);
+            }
+        }
+
+        private static string AddCacheBuster(string url)
+        {
+            if (string.IsNullOrEmpty(url) || url.IndexOf('?') >= 0) return url;
+            return url + "?t=" + Environment.TickCount;
+        }
+
+        private static Version GetExeVersion(string path)
+        {
+            try
+            {
+                FileVersionInfo vi = FileVersionInfo.GetVersionInfo(path);
+                return ParseVer(vi.FileVersion);
+            }
+            catch { return null; }
+        }
+
+        private static Version Quad(Version v)
+        {
+            if (v == null) return null;
+            return new Version(v.Major, v.Minor, Math.Max(0, v.Build), Math.Max(0, v.Revision));
+        }
+
+        private static void LogSelfUpdate(string message)
+        {
+            try
+            {
+                string logPath = Path.Combine(Path.GetDirectoryName(CurrentExePath), "launcher-update.log");
+                FileInfo fi = new FileInfo(logPath);
+                if (fi.Exists && fi.Length > 64 * 1024) fi.Delete();
+                File.AppendAllText(logPath, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "  " + message + Environment.NewLine, new UTF8Encoding(false));
             }
             catch { }
+        }
+
+        private static void TryDeleteFile(string path)
+        {
+            try { if (File.Exists(path)) File.Delete(path); } catch { }
         }
 
         public static List<PendingModUpdate> FindPendingUpdates(string gamePath, string gameVer, ManifestRoot manifest)

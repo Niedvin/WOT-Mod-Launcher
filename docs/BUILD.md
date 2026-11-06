@@ -20,7 +20,9 @@ Mod development and installer packaging are separate commands. Unit tests are op
 
 Research and FPS packages include their complete external resource payloads. On initialization, the mods verify and install their own payloads with backups. Research preserves an unrecognized shared Gameface override. Future owned overrides use a SHA-256 sidecar to distinguish them from other modifications.
 
-The launcher normally opens the update panel before starting the game. `--update-only` runs the actual network update flow and exits without starting the game. `--check-only` performs a silent availability check. These options do not change `launcher.json` or redirect the public update source.
+The launcher normally opens the update panel before starting the game. `--update-only` runs the actual network update flow and exits without starting the game. `--check-only` performs a silent availability check. `--self-update` is the hidden worker that applies a staged launcher exe; it is spawned after the game starts and shows no UI. These options do not change `launcher.json` or redirect the public update source.
+
+Bump `AssemblyFileVersion` and `AssemblyVersion` in `src/WotModLauncher.cs` for every launcher release. `manifest.json` takes the launcher version from the built exe, and installed clients only update to a strictly newer version.
 
 Release files are generated in `build/release_assets/`: 12 mod/framework packages, launcher, manifest, single-file installer and ZIP. Publish only after explicit user authorization and validate uploaded asset hashes. The installer is self-signed; its certificate is not trusted by Windows by default.
 

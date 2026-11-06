@@ -2,6 +2,16 @@ import os
 import shutil
 import json
 import re
+import hashlib
+
+REMOTE_BASE = 'https://github.com/Niedvin/WOT-Mod-Launcher/releases/latest/download'
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(1048576), b''):
+            h.update(chunk)
+    return h.hexdigest()
 
 def get_game_version():
     if os.path.exists('version.xml'):
@@ -99,7 +109,7 @@ mods_def = [
         'author': 'Niedvin',
         'description': 'Налаштування яскравості та радіуса підсвічування коліматора/ліхтарика зон пробиття броні (зелений 1.5x, жовтий 1.1x, збільшений радіус 1.5x).',
         'changes': 'Нова назва: Velet Penetration. Функціонал без змін.',
-        'default_checked': True,
+        'default_checked': False,
         'clean_patterns': ['ua.armor_flashlight_brightness*.wotmod'],
         'clean_res_mods': [],
         'readme_features': [
@@ -186,7 +196,7 @@ mods_def = [
         'author': 'Niedvin',
         'description': 'Відображає приціл у реальному часі, таймер перезарядки, стан модулів і екіпажу, а також таймери перезарядки спорядження союзника, за яким ви спостерігаєте після знищення вашого танка.',
         'changes': 'Таймер перезарядки більше не смикається назад під час спостереження.',
-        'default_checked': True,
+        'default_checked': False,
         'clean_patterns': ['ua.spectator_teammate_hud*.wotmod'],
         'clean_res_mods': [],
         'readme_features': [
@@ -258,7 +268,7 @@ mods_def = [
         'author': 'OpenWG Team',
         'description': 'OpenWG GPU: AMD Radeon Anti-Lag 2 для меншої затримки вводу та Intel XeSS для апскейлу. NVIDIA Reflex, DLSS, FSR та нейрорендеринг вимкнені у налаштуваннях за замовчуванням. Мод вбудовується в рендер клієнта (нативні DLL), тому використовуйте на власний ризик.',
         'changes': 'Додано OpenWG Common 2.8.3 з Anti-Lag 2 та апскейлером XeSS.',
-        'default_checked': True,
+        'default_checked': False,
         'clean_patterns': ['net.openwg/net.openwg.common_*.wotmod', 'net.openwg/net.openwg.gpu.*.wotmod'],
         'clean_res_mods': [],
         'readme_features': [
@@ -268,11 +278,13 @@ mods_def = [
             'Оновлення бібліотек перевіряється інсталятором на GitLab OpenWG.'
         ],
         'files': [
-            (f'mods/{ver}/net.openwg/net.openwg.common_2.8.3.0000.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.common_2.8.3.0000.wotmod'),
-            (f'mods/{ver}/net.openwg/net.openwg.gpu.upscaler_2.8.3.0000.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.gpu.upscaler_2.8.3.0000.wotmod'),
-            (f'mods/{ver}/net.openwg/net.openwg.gpu.upscaler.xess_2.8.3.0000.wotmod', 'game_files/mods/_VERSION_/net.openwg/net.openwg.gpu.upscaler.xess_2.8.3.0000.wotmod'),
             (src_first('src/mods/openwg_gpu/gpu.json', 'scratch/openwg_gpu_cfg/gpu.json'), 'game_files/mods/configs/net.openwg.wot.common/gpu.json'),
             (src_first('src/mods/openwg_gpu/upscaler.json', 'scratch/openwg_gpu_cfg/upscaler.json'), 'game_files/mods/configs/net.openwg.gpu.upscaler/config.json')
+        ],
+        'remote': [
+            (f'mods/{ver}/net.openwg/net.openwg.common_2.8.3.0000.wotmod', 'net.openwg', 'net.openwg.common'),
+            (f'mods/{ver}/net.openwg/net.openwg.gpu.upscaler_2.8.3.0000.wotmod', 'net.openwg', 'net.openwg.gpu.upscaler'),
+            (f'mods/{ver}/net.openwg/net.openwg.gpu.upscaler.xess_2.8.3.0000.wotmod', 'net.openwg', 'net.openwg.gpu.upscaler.xess')
         ],
         'updates': [
             {'id': 'net.openwg.common', 'kind': 'openwg_zip', 'repo': 'openwg/wot.common'},
@@ -296,6 +308,21 @@ for m in mods_def:
     for root, dirs, files in os.walk(os.path.join(target_mod_dir, 'game_files')):
         for f in files:
             total_size += os.path.getsize(os.path.join(root, f))
+
+    remote_entries = []
+    for src, sub, mod_id in m.get('remote', []):
+        name = os.path.basename(src)
+        remote_entries.append({
+            'id': mod_id,
+            'file': name,
+            'path': 'game_files/mods/_VERSION_/{0}/{1}'.format(sub, name),
+            'source': src,
+            'size': os.path.getsize(src),
+            'sha256': sha256_file(src),
+            'url': '{0}/{1}'.format(REMOTE_BASE, name)
+        })
+        total_size += os.path.getsize(src)
+
     info = {
         'id': m['id'],
         'title': m['title'],
@@ -308,6 +335,9 @@ for m in mods_def:
         'clean_res_mods': m['clean_res_mods'],
         'size_bytes': total_size
     }
+    if remote_entries:
+        info['download_bytes'] = sum(r['size'] for r in remote_entries)
+        info['remote_files'] = remote_entries
     if m.get('required'):
         info['required'] = True
     if m.get('updates'):
@@ -326,6 +356,13 @@ for i, m in enumerate(mods_def, 1):
     for feat in m['readme_features']:
         readme += f"   - {feat}\n"
 readme += '\n-------------------------------------------------------------------\n'
+readme += 'Завантаження важких пакетів:\n'
+readme += '-------------------------------------------------------------------\n'
+readme += 'Пакети GPU Boost (OpenWG Core, DLSS/FSR та XeSS, ~167 МБ) не входять у дистрибутив.\n'
+readme += 'Інсталятор завантажує їх з GitHub лише тоді, коли позначено мод GPU Boost,\n'
+readme += 'перевіряє SHA-256 і кешує у %LOCALAPPDATA%\\WotModpack\\payload_cache.\n'
+readme += 'Якщо інтернету немає — решта модів встановлюється, GPU Boost пропускається.\n\n'
+readme += '-------------------------------------------------------------------\n'
 readme += 'Лаунчер автооновлення модів:\n'
 readme += '-------------------------------------------------------------------\n'
 readme += 'Під час встановлення можна встановити лаунчер WotModLauncher\n'
@@ -345,6 +382,9 @@ readme += '2. Варіант "архів": розархівуйте WoT_Modpack_
 readme += '   (якщо з\'явиться SmartScreen Windows: натисніть "Докладніше" -> "Виконати в будь-якому разі")\n'
 readme += '3. Інсталятор автоматично знайде шлях до встановленої гри World of Tanks та визначить актуальну версію клієнта.\n'
 readme += '4. Оберіть потрібні моди, параметри встановлення (бекап, лаунчер автооновлення) та натисніть "Встановити вибрані моди".\n'
+readme += '   Моди, зняті з вибору, видаляються з гри разом зі своїми локальними файлами\n'
+readme += '   попередніх версій (галочка "Видаляти зняті моди з гри"; за увімкненого бекапу\n'
+readme += '   їхні файли зберігаються у .backups).\n'
 readme += '5. За потреби можна запустити гру одразу через кнопку "Запустити World of Tanks".\n\n'
 readme += '-------------------------------------------------------------------\n'
 readme += 'Видалення:\n'

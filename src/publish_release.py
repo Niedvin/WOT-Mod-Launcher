@@ -4,12 +4,12 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime
 
 REPO_BASE_URL = "https://github.com/Niedvin/WOT-Mod-Launcher/releases/latest/download"
-LAUNCHER_VERSION = "1.1.0"
 
 def sha256_file(path):
     h = hashlib.sha256()
@@ -17,6 +17,19 @@ def sha256_file(path):
         for chunk in iter(lambda: f.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()
+
+def read_launcher_version(exe_path):
+    exe_path = os.path.abspath(exe_path).replace("'", "''")
+    ps = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32",
+                      "WindowsPowerShell", "v1.0", "powershell.exe")
+    cmd = "[System.Diagnostics.FileVersionInfo]::GetVersionInfo('%s').FileVersion" % exe_path
+    out = subprocess.check_output(
+        [ps, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", cmd],
+        stderr=subprocess.STDOUT,
+    ).decode("utf-8", errors="replace").strip().lstrip("\ufeff")
+    if not re.match(r"^\d+\.\d+\.\d+\.\d+$", out):
+        raise SystemExit("Launcher exe has no 4-part FileVersion: %r" % out)
+    return out
 
 def detect_game_version():
     with open("version.xml", "r", encoding="utf-8") as f:
@@ -68,6 +81,21 @@ def iter_staged_wotmods():
                     rel_sub = ""
                 yield full_path, fname, rel_sub, info
 
+def iter_remote_payloads():
+    mods_root = os.path.join("staging_modpack", "Mods")
+    for folder in sorted(os.listdir(mods_root)):
+        info_path = os.path.join(mods_root, folder, "info.json")
+        if not os.path.isfile(info_path):
+            continue
+        with open(info_path, "r", encoding="utf-8") as f:
+            info = json.load(f)
+        for rf in info.get("remote_files") or []:
+            src = rf["source"]
+            if not os.path.isfile(src):
+                raise SystemExit("Remote payload missing: " + src)
+            rel_sub = os.path.dirname(rf["path"].replace("\\", "/")).split("_VERSION_/", 1)[-1]
+            yield src, rf["file"], rel_sub, info
+
 def reset_dir(path):
     if os.path.exists(path):
         shutil.rmtree(path)
@@ -80,7 +108,7 @@ def local_test(game_ver, bump, out_dir):
     launcher_src = os.path.join("staging_modpack", "Launcher", "WotModLauncher.exe")
     launcher_dst = os.path.join(out_dir, "WotModLauncher.exe")
     shutil.copy2(launcher_src, launcher_dst)
-    launcher_version = bump_version(LAUNCHER_VERSION) if bump else LAUNCHER_VERSION
+    launcher_version = read_launcher_version(launcher_dst)
 
     mods_entries = []
     for full_path, fname, rel_sub, info in iter_staged_wotmods():
@@ -91,6 +119,23 @@ def local_test(game_ver, bump, out_dir):
         mods_entries.append({
             "id": w_id,
             "title": info["title"] if not rel_sub else f"{info['title']} ({w_id})",
+            "version": w_ver,
+            "file": fname,
+            "subdir": rel_sub,
+            "url": os.path.abspath(os.path.join(out_dir, fname)),
+            "sha256": sha256_file(full_path),
+            "size": os.path.getsize(full_path),
+            "changes": info.get("changes") or info.get("description", "")
+        })
+
+    for full_path, fname, rel_sub, info in iter_remote_payloads():
+        w_id, w_ver = parse_wotmod_meta(full_path, fname)
+        if bump:
+            w_ver = bump_version(w_ver)
+        shutil.copy2(full_path, os.path.join(out_dir, fname))
+        mods_entries.append({
+            "id": w_id,
+            "title": f"{info['title']} ({w_id})",
             "version": w_ver,
             "file": fname,
             "subdir": rel_sub,
@@ -116,6 +161,7 @@ def local_test(game_ver, bump, out_dir):
         json.dump(manifest, f, indent=2, ensure_ascii=False)
 
     print("Local test manifest:", manifest_path)
+    print("Launcher version:", launcher_version)
     print()
     print("1. Install the modpack with WoT_Modpack_by_Niedvin_Setup.exe and close the game.")
     print("2. Prepare an outdated mod for the test (if live mods are already up to date):")
@@ -151,6 +197,7 @@ def main():
 
     launcher_exe = os.path.join("staging_modpack", "Launcher", "WotModLauncher.exe")
     shutil.copy2(launcher_exe, os.path.join(assets_dir, "WotModLauncher.exe"))
+    launcher_version = read_launcher_version(launcher_exe)
 
     mods_entries = []
     for full_path, fname, rel_sub, info in iter_staged_wotmods():
@@ -171,12 +218,27 @@ def main():
             "changes": changes
         })
 
+    for full_path, fname, rel_sub, info in iter_remote_payloads():
+        w_id, w_ver = parse_wotmod_meta(full_path, fname)
+        shutil.copy2(full_path, os.path.join(assets_dir, fname))
+        mods_entries.append({
+            "id": w_id,
+            "title": f"{info['title']} ({w_id})",
+            "version": w_ver,
+            "file": fname,
+            "subdir": rel_sub,
+            "url": f"{REPO_BASE_URL}/{fname}",
+            "sha256": sha256_file(full_path),
+            "size": os.path.getsize(full_path),
+            "changes": info.get("changes") or info.get("description", "")
+        })
+
     manifest = {
         "schema": 1,
         "pack_version": pack_ver,
         "game_version": game_ver,
         "launcher": {
-            "version": LAUNCHER_VERSION,
+            "version": launcher_version,
             "url": f"{REPO_BASE_URL}/WotModLauncher.exe",
             "sha256": sha256_file(launcher_exe)
         },
@@ -195,7 +257,7 @@ def main():
     if os.path.isfile(setup_exe):
         shutil.copy2(setup_exe, os.path.join(assets_dir, setup_exe))
 
-    print(f"Prepared {len(mods_entries)} mod packages + manifest in {assets_dir}")
+    print(f"Prepared {len(mods_entries)} mod packages + manifest in {assets_dir} (launcher {launcher_version})")
 
 if __name__ == "__main__":
     main()
