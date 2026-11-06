@@ -82,6 +82,7 @@ namespace WotModpackInstaller
     public class InstallerSettings
     {
         public Dictionary<string, bool> mods { get; set; }
+        public Dictionary<string, bool> mod_defaults { get; set; }
         public Dictionary<string, bool> options { get; set; }
         public string game_path { get; set; }
     }
@@ -871,10 +872,12 @@ namespace WotModpackInstaller
             {
                 var settings = new InstallerSettings();
                 settings.mods = new Dictionary<string, bool>();
+                settings.mod_defaults = new Dictionary<string, bool>();
                 for (int i = 0; i < chkListMods.Items.Count; i++)
                 {
                     var item = (ModItem)chkListMods.Items[i];
                     settings.mods[item.id] = chkListMods.GetItemChecked(i);
+                    settings.mod_defaults[item.id] = item.default_checked;
                 }
                 settings.options = new Dictionary<string, bool>
                 {
@@ -915,6 +918,7 @@ namespace WotModpackInstaller
             Array.Sort(dirs);
 
             JavaScriptSerializer serializer = new JavaScriptSerializer();
+            int defaultsChanged = 0;
 
             foreach (var dir in dirs)
             {
@@ -944,11 +948,24 @@ namespace WotModpackInstaller
                 try
                 {
                     int idx = chkListMods.Items.Add(item);
+                    bool checkedNow = item.default_checked;
                     bool wasChecked;
                     if (savedSettings != null && savedSettings.mods != null && savedSettings.mods.TryGetValue(item.id, out wasChecked))
-                        chkListMods.SetItemChecked(idx, wasChecked);
-                    else
-                        chkListMods.SetItemChecked(idx, item.default_checked);
+                    {
+                        bool oldDefault;
+                        bool explicitChoice = savedSettings.mod_defaults != null
+                            && savedSettings.mod_defaults.TryGetValue(item.id, out oldDefault)
+                            && wasChecked != oldDefault;
+                        if (explicitChoice)
+                        {
+                            checkedNow = wasChecked;
+                        }
+                        else if (wasChecked != item.default_checked)
+                        {
+                            defaultsChanged++;
+                        }
+                    }
+                    chkListMods.SetItemChecked(idx, checkedNow);
                 }
                 catch (Exception ex)
                 {
@@ -964,6 +981,8 @@ namespace WotModpackInstaller
 
             var req = loadedMods.FindAll(m => m.required).ConvertAll(m => m.title);
             LogOk(string.Format("Модів у збірці: {0} на вибір + {1} системних", loadedMods.Count - req.Count, req.Count));
+            if (defaultsChanged > 0)
+                Log(string.Format("[Налаштування] Стандартний вибір оновлено: {0} мод(ів) приведено до нових дефолтів", defaultsChanged));
             foreach (ModItem mod in loadedMods)
                 Log(string.Format("   • {0} v{1}{2}", mod.title, mod.version, mod.required ? " (системний, завжди)" : ""));
         }
@@ -1555,7 +1574,12 @@ namespace WotModpackInstaller
                         int[] clean = CleanModOldVersions(gamePath, mod, backupDir);
                         cleaned += clean[0];
                         backedUp += clean[1];
-                        if (clean[0] > 0)
+                        int cfg = CleanModConfigDirs(gamePath, mod, backupDir);
+                        if (cfg > 0)
+                        {
+                            LogOk(string.Format("    прибрано тек налаштувань: {0}", cfg));
+                        }
+                        if (clean[0] > 0 || cfg > 0)
                         {
                             unselectedRemoved++;
                             LogOk(string.Format("    прибрано файлів {0}, у бекап {1}", clean[0], clean[1]));
@@ -1826,6 +1850,41 @@ namespace WotModpackInstaller
             }
 
             return new int[] { removed, backed };
+        }
+
+        private int CleanModConfigDirs(string gamePath, ModItem mod, string backupDir)
+        {
+            string src = Path.Combine(mod.FolderPath, "game_files", "mods", "configs");
+            if (!Directory.Exists(src)) return 0;
+            int removed = 0;
+            foreach (string dir in Directory.GetDirectories(src))
+            {
+                string name = Path.GetFileName(dir);
+                string dest = Path.Combine(gamePath, "mods", "configs", name);
+                if (!Directory.Exists(dest)) continue;
+                try
+                {
+                    if (!string.IsNullOrEmpty(backupDir))
+                        CopyDirTree(dest, Path.Combine(backupDir, "mods", "configs", name));
+                    Directory.Delete(dest, true);
+                    removed++;
+                    Log("    прибрано налаштування: mods\\configs\\" + name);
+                }
+                catch (Exception ex)
+                {
+                    LogWarn("    не вдалося прибрати mods\\configs\\" + name + ": " + RootCause(ex));
+                }
+            }
+            return removed;
+        }
+
+        private static void CopyDirTree(string srcDir, string dstDir)
+        {
+            Directory.CreateDirectory(dstDir);
+            foreach (string file in Directory.GetFiles(srcDir))
+                File.Copy(file, Path.Combine(dstDir, Path.GetFileName(file)), true);
+            foreach (string dir in Directory.GetDirectories(srcDir))
+                CopyDirTree(dir, Path.Combine(dstDir, Path.GetFileName(dir)));
         }
 
         private int[] CleanByPattern(string baseDir, string pattern, string backupDir, string gamePath)

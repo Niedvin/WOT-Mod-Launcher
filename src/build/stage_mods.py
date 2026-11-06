@@ -196,7 +196,7 @@ mods_def = [
         'author': 'Niedvin',
         'description': 'Відображає приціл у реальному часі, таймер перезарядки, стан модулів і екіпажу, а також таймери перезарядки спорядження союзника, за яким ви спостерігаєте після знищення вашого танка.',
         'changes': 'Таймер перезарядки більше не смикається назад під час спостереження.',
-        'default_checked': False,
+        'default_checked': True,
         'clean_patterns': ['ua.spectator_teammate_hud*.wotmod'],
         'clean_res_mods': [],
         'readme_features': [
