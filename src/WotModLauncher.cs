@@ -21,8 +21,8 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("Niedvin")]
 [assembly: AssemblyProduct("WoT Modpack by Niedvin")]
 [assembly: AssemblyCopyright("Copyright © 2026 Niedvin")]
-[assembly: AssemblyFileVersion("1.4.1.0")]
-[assembly: AssemblyVersion("1.4.1.0")]
+[assembly: AssemblyFileVersion("1.4.2.0")]
+[assembly: AssemblyVersion("1.4.2.0")]
 
 namespace WotModLauncher
 {
@@ -131,6 +131,53 @@ namespace WotModLauncher
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WotModpack"); }
         }
 
+        public static string DeclinedModsPath
+        {
+            get { return Path.Combine(LauncherDir, "declined.json"); }
+        }
+
+        public static List<string> LoadDeclinedMods()
+        {
+            try
+            {
+                if (!File.Exists(DeclinedModsPath)) return new List<string>();
+                var serializer = new JavaScriptSerializer();
+                List<string> result = serializer.Deserialize<List<string>>(File.ReadAllText(DeclinedModsPath, Encoding.UTF8));
+                return result ?? new List<string>();
+            }
+            catch
+            {
+                return new List<string>();
+            }
+        }
+
+        public static void AddDeclinedMods(List<string> ids)
+        {
+            List<string> current = LoadDeclinedMods();
+            foreach (string id in ids)
+            {
+                if (string.IsNullOrEmpty(id)) continue;
+                bool found = false;
+                foreach (string existing in current)
+                {
+                    if (string.Equals(existing, id, StringComparison.OrdinalIgnoreCase))
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) current.Add(id);
+            }
+            try
+            {
+                var serializer = new JavaScriptSerializer();
+                File.WriteAllText(DeclinedModsPath, serializer.Serialize(current), new UTF8Encoding(false));
+            }
+            catch
+            {
+            }
+        }
+
         private static string CurrentExePath
         {
             get { return Assembly.GetExecutingAssembly().Location; }
@@ -144,6 +191,7 @@ namespace WotModLauncher
         [STAThread]
         public static int Main(string[] args)
         {
+
             // .NET 4.0 defaults to TLS 1.0 which GitHub drops — 2026-10-24
             ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
 
@@ -163,7 +211,9 @@ namespace WotModLauncher
             }
 
             if (selfUpdateMode)
+            {
                 return RunSelfUpdate();
+            }
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
@@ -172,7 +222,9 @@ namespace WotModLauncher
             CleanupSelfUpdateOldBinary();
 
             if (!checkOnly && IsGameAlreadyRunning())
+            {
                 return 0;
+            }
 
             LauncherConfig cfg = LoadConfig(argGamePath);
             if (cfg == null || string.IsNullOrEmpty(cfg.game_path) || !Directory.Exists(cfg.game_path))
@@ -203,24 +255,37 @@ namespace WotModLauncher
 
             string activeVer = gameVer;
             bool launchWithoutMods = false;
+            bool applyLauncherUpdate = true;
             SelfUpdateState selfUpdatePlan = null;
+            List<string> declinedMods = LoadDeclinedMods();
             ManifestRoot manifest = FetchManifestWithTimeout(4000);
             if (manifest != null)
             {
                 selfUpdatePlan = GetSelfUpdatePlan(manifest.launcher);
                 if (string.IsNullOrEmpty(activeVer)) activeVer = manifest.game_version;
-                List<PendingModUpdate> updates = FindPendingUpdates(cfg.game_path, activeVer, manifest, cfg.skip_mods);
-                if (!checkOnly && updates.Count > 0)
+                List<PendingModUpdate> updates = FindPendingUpdates(cfg.game_path, activeVer, manifest, cfg.skip_mods, declinedMods);
+                foreach (PendingModUpdate update in updates)
                 {
-                    using (var form = new UpdateDialogForm(cfg.game_path, activeVer, updates))
+                }
+                if (selfUpdatePlan == null && !checkOnly && !updateOnly)
+                    selfUpdatePlan = LoadPendingUpdateState();
+                if (!checkOnly && (updates.Count > 0 || selfUpdatePlan != null))
+                {
+                    using (var form = new UpdateDialogForm(cfg.game_path, activeVer, updates, selfUpdatePlan))
                     {
                         Application.Run(form);
                         launchWithoutMods = form.LaunchWithoutMods;
+                        applyLauncherUpdate = form.ApplyLauncherUpdate;
                     }
                 }
             }
+            else
+            {
+            }
             if (selfUpdatePlan == null && !checkOnly && !updateOnly)
                 selfUpdatePlan = LoadPendingUpdateState();
+            if (!applyLauncherUpdate)
+                selfUpdatePlan = null;
 
             if (!checkOnly && !updateOnly)
             {
@@ -366,7 +431,10 @@ namespace WotModLauncher
                 if (p.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
                 {
                     try { p = new Uri(p).LocalPath; }
-                    catch { return null; }
+                    catch
+                    {
+                        return null;
+                    }
                 }
                 if (p.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || p.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
                 {
@@ -376,14 +444,21 @@ namespace WotModLauncher
                 {
                     if (!File.Exists(p) && Directory.Exists(p))
                         p = Path.Combine(p, "manifest.json");
-                    if (!File.Exists(p)) return null;
+                    if (!File.Exists(p))
+                    {
+                        return null;
+                    }
                     try
                     {
                         ManifestLocalDir = Path.GetDirectoryName(Path.GetFullPath(p));
                         var serLocal = new JavaScriptSerializer();
-                        return serLocal.Deserialize<ManifestRoot>(File.ReadAllText(p, Encoding.UTF8));
+                        ManifestRoot local = serLocal.Deserialize<ManifestRoot>(File.ReadAllText(p, Encoding.UTF8));
+                        return local;
                     }
-                    catch { return null; }
+                    catch
+                    {
+                        return null;
+                    }
                 }
             }
 
@@ -682,6 +757,11 @@ namespace WotModLauncher
 
         public static List<PendingModUpdate> FindPendingUpdates(string gamePath, string gameVer, ManifestRoot manifest, List<string> skipMods)
         {
+            return FindPendingUpdates(gamePath, gameVer, manifest, skipMods, null);
+        }
+
+        public static List<PendingModUpdate> FindPendingUpdates(string gamePath, string gameVer, ManifestRoot manifest, List<string> skipMods, List<string> declinedMods)
+        {
             var result = new List<PendingModUpdate>();
             if (manifest == null || manifest.mods == null || string.IsNullOrEmpty(gameVer))
                 return result;
@@ -693,7 +773,7 @@ namespace WotModLauncher
             {
                 if (entry == null || string.IsNullOrEmpty(entry.id) || string.IsNullOrEmpty(entry.version) || string.IsNullOrEmpty(entry.file))
                     continue;
-                if (IsSkipped(skipMods, entry.id))
+                if (IsSkipped(skipMods, entry.id) || IsSkipped(declinedMods, entry.id))
                     continue;
 
                 string searchDir = string.IsNullOrEmpty(entry.subdir)
@@ -713,6 +793,23 @@ namespace WotModLauncher
                         if (m.Success)
                         {
                             Version v = ParseVer(m.Groups[1].Value);
+                            if (v != null && (foundVer == null || v > foundVer))
+                            {
+                                foundVer = v;
+                                foundFile = f;
+                            }
+                        }
+                    }
+                    // manifest ids were shortened to server_online while files keep ua.* names — 2026-11-09
+                    if (foundFile == null)
+                    {
+                        foreach (string f in Directory.GetFiles(searchDir, "*.wotmod", SearchOption.TopDirectoryOnly))
+                        {
+                            if (!string.Equals(ReadWotmodId(f), entry.id, StringComparison.OrdinalIgnoreCase))
+                                continue;
+                            Match mv = Regex.Match(Path.GetFileName(f), @"_([0-9]+(?:\.[0-9]+)*)\.wotmod$", RegexOptions.IgnoreCase);
+                            if (!mv.Success) continue;
+                            Version v = ParseVer(mv.Groups[1].Value);
                             if (v != null && (foundVer == null || v > foundVer))
                             {
                                 foundVer = v;
@@ -757,6 +854,24 @@ namespace WotModLauncher
             if (string.IsNullOrEmpty(s)) return null;
             Version v;
             return Version.TryParse(s.TrimStart('v', 'V'), out v) ? v : null;
+        }
+
+        private static string ReadWotmodId(string filePath)
+        {
+            try
+            {
+                using (ZipArchive zip = ZipFile.OpenRead(filePath))
+                {
+                    ZipArchiveEntry meta = zip.GetEntry("meta.xml");
+                    if (meta == null) return null;
+                    using (StreamReader sr = new StreamReader(meta.Open(), Encoding.UTF8))
+                    {
+                        Match m = Regex.Match(sr.ReadToEnd(), @"<id>\s*([^<]+?)\s*</id>", RegexOptions.IgnoreCase);
+                        return m.Success ? m.Groups[1].Value.Trim() : null;
+                    }
+                }
+            }
+            catch { return null; }
         }
 
         public static string ResolveLocalUrl(string url)
@@ -851,18 +966,26 @@ namespace WotModLauncher
                         link.SetIconLocation(iconFile, 0);
                         ((IPersistFile)link).Save(lnkPath, true);
                     }
+                    catch
+                    {
+                    }
                     finally
                     {
                         Marshal.FinalReleaseComObject(link);
                     }
                 }
             }
-            catch { }
+            catch
+            {
+            }
         }
 
         public static void LaunchGame(string gamePath)
         {
-            if (string.IsNullOrEmpty(gamePath)) return;
+            if (string.IsNullOrEmpty(gamePath))
+            {
+                return;
+            }
             string wgcApi = Path.Combine(gamePath, "wgc_api.exe");
             if (File.Exists(wgcApi))
             {
@@ -876,13 +999,18 @@ namespace WotModLauncher
                     });
                     return;
                 }
-                catch { }
+                catch
+                {
+                }
             }
 
             string exe = Path.Combine(gamePath, "WorldOfTanks.exe");
             if (!File.Exists(exe))
                 exe = Path.Combine(gamePath, "win64", "WorldOfTanks.exe");
-            if (!File.Exists(exe)) return;
+            if (!File.Exists(exe))
+            {
+                return;
+            }
             try
             {
                 Process.Start(new ProcessStartInfo
@@ -891,7 +1019,9 @@ namespace WotModLauncher
                     WorkingDirectory = gamePath
                 });
             }
-            catch { }
+            catch
+            {
+            }
         }
 
         private static void CopyMissing(string source, string target)
@@ -951,531 +1081,605 @@ namespace WotModLauncher
     {
         private readonly string gamePath;
         private readonly string gameVer;
-        private readonly List<PendingModUpdate> updates;
+        private readonly SelfUpdateState launcherUpdate;
+        private readonly List<PendingModUpdate> updateItems = new List<PendingModUpdate>();
+        private readonly List<PendingModUpdate> newItems = new List<PendingModUpdate>();
 
-        private readonly System.Windows.Forms.Timer animTimer;
-        private float fadeProgress = 0f;
-        private float btnUpdateHover = 0f;
-        private float btnSkipHover = 0f;
-        private float btnNoModsHover = 0f;
-        private float btnCloseHover = 0f;
-        private bool isHoverUpdate = false;
-        private bool isHoverSkip = false;
-        private bool isHoverNoMods = false;
-        private bool isHoverClose = false;
+        private readonly Label lblTitle;
+        private readonly Label lblSubtitle;
+        private readonly CheckBox chkLauncher;
+        private readonly Label lblLauncher;
+        private readonly Label lblUpdatesHeader;
+        private readonly Label lblNewHeader;
+        private readonly ListView listUpdates;
+        private readonly ListView listNew;
+        private readonly Label lblUpdatesEmpty;
+        private readonly Label lblNewEmpty;
+        private readonly Button btnUpdate;
+        private readonly Button btnSkip;
+        private readonly Button btnNoMods;
+        private readonly Button btnDecline;
+        private readonly Button btnSelectAll;
+        private readonly Button btnSelectNone;
+        private readonly ProgressBar progress;
+        private readonly Label lblStatus;
+
+        private readonly Font fontBase = new Font("Segoe UI", 9f);
+        private readonly Font fontTitle = new Font("Segoe UI", 14f, FontStyle.Bold);
+        private readonly Font fontHeader = new Font("Segoe UI", 9f, FontStyle.Bold);
+        private readonly Font fontButton = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+
+        private bool isLoading;
+        private bool isUpdating;
+
         public bool LaunchWithoutMods { get; private set; }
-        private int hoveredCardIndex = -1;
-        private int scrollOffset = 0;
-        private int maxScroll = 0;
+        public bool ApplyLauncherUpdate { get; private set; }
 
-        private bool isUpdating = false;
-        private float targetProgress = 0f;
-        private float displayProgress = 0f;
-        private float shimmerOffset = 0f;
-        private string statusText = "Готово до швидкого оновлення";
+        private static readonly Color ColBg = Color.FromArgb(18, 22, 31);
+        private static readonly Color ColPanel = Color.FromArgb(24, 30, 43);
+        private static readonly Color ColRow = Color.FromArgb(28, 36, 50);
+        private static readonly Color ColList = Color.FromArgb(22, 28, 40);
+        private static readonly Color ColText = Color.FromArgb(240, 244, 250);
+        private static readonly Color ColMuted = Color.FromArgb(148, 160, 180);
+        private static readonly Color ColGold = Color.FromArgb(229, 154, 40);
+        private static readonly Color ColGreen = Color.FromArgb(110, 231, 160);
+        private static readonly Color ColButton = Color.FromArgb(34, 42, 58);
+        private static readonly Color ColButtonBorder = Color.FromArgb(60, 72, 94);
 
-        private bool dragging = false;
-        private Point dragStart;
-
-        private Rectangle rectHeader;
-        private Rectangle rectClose;
-        private Rectangle rectListViewport;
-        private Rectangle rectBtnUpdate;
-        private Rectangle rectBtnSkip;
-        private Rectangle rectBtnNoMods;
-        private Rectangle rectProgressBar;
-
-        private readonly Font fontTitle = new Font("Segoe UI", 13.5f, FontStyle.Bold, GraphicsUnit.Point);
-        private readonly Font fontSubtitle = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
-        private readonly Font fontModTitle = new Font("Segoe UI", 10f, FontStyle.Bold, GraphicsUnit.Point);
-        private readonly Font fontBadge = new Font("Consolas", 9f, FontStyle.Bold, GraphicsUnit.Point);
-        private readonly Font fontChanges = new Font("Segoe UI", 8.8f, FontStyle.Regular, GraphicsUnit.Point);
-        private readonly Font fontButton = new Font("Segoe UI", 10f, FontStyle.Bold, GraphicsUnit.Point);
-        private readonly Font fontStatus = new Font("Segoe UI", 8.8f, FontStyle.Regular, GraphicsUnit.Point);
-
-        private readonly SolidBrush brushBg = new SolidBrush(Color.FromArgb(18, 22, 31));
-        private readonly SolidBrush brushHeader = new SolidBrush(Color.FromArgb(24, 30, 43));
-        private readonly SolidBrush brushGold = new SolidBrush(Color.FromArgb(229, 154, 40));
-        private readonly SolidBrush brushTextMain = new SolidBrush(Color.FromArgb(240, 244, 250));
-        private readonly SolidBrush brushTextMuted = new SolidBrush(Color.FromArgb(148, 160, 180));
-        private readonly SolidBrush brushBadgeBg = new SolidBrush(Color.FromArgb(32, 54, 44));
-        private readonly SolidBrush brushBadgeFg = new SolidBrush(Color.FromArgb(110, 231, 160));
-        private readonly Pen penBorder = new Pen(Color.FromArgb(46, 56, 76), 1f);
-        private readonly Pen penAccentTop = new Pen(Color.FromArgb(229, 154, 40), 2f);
-
-        private const int CardHeight = 68;
-        private const int CardGap = 8;
-
-        public UpdateDialogForm(string gamePath, string gameVer, List<PendingModUpdate> updates)
+        public UpdateDialogForm(string gamePath, string gameVer, List<PendingModUpdate> updates, SelfUpdateState launcherUpdate)
         {
             this.gamePath = gamePath;
             this.gameVer = gameVer;
-            this.updates = updates;
-            if (updates.Count == 0)
-                statusText = "Оновлень немає";
+            this.launcherUpdate = launcherUpdate;
+            this.ApplyLauncherUpdate = launcherUpdate != null;
 
-            this.FormBorderStyle = FormBorderStyle.None;
-            this.StartPosition = FormStartPosition.CenterScreen;
-            this.Size = new Size(560, 440);
-            this.DoubleBuffered = true;
-            this.SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            this.BackColor = Color.FromArgb(18, 22, 31);
-            this.Text = "WoT Modpack — Оновлення модів";
-            this.TopMost = true;
-            this.Opacity = 0.0;
+            foreach (PendingModUpdate item in updates)
+            {
+                if (item.IsNew) newItems.Add(item);
+                else updateItems.Add(item);
+            }
+
+            Text = "WoT Modpack — Оновлення модів";
+            StartPosition = FormStartPosition.CenterScreen;
+            Size = new Size(1020, 720);
+            MinimumSize = new Size(820, 600);
+            BackColor = ColBg;
+            ForeColor = ColText;
+            Font = fontBase;
+            AutoScaleMode = AutoScaleMode.None;
+            FormBorderStyle = FormBorderStyle.Sizable;
+            MaximizeBox = true;
+            MinimizeBox = false;
+            TopMost = true;
+            DoubleBuffered = true;
 
             try
             {
                 string ico = Path.Combine(gamePath, "game_metadata", "game.ico");
-                if (File.Exists(ico)) this.Icon = new Icon(ico);
+                if (File.Exists(ico)) Icon = new Icon(ico);
             }
             catch { }
 
-            ComputeLayout();
+            TableLayoutPanel root = new TableLayoutPanel();
+            root.Dock = DockStyle.Fill;
+            root.ColumnCount = 1;
+            root.RowCount = 4;
+            root.BackColor = ColBg;
+            root.Margin = new Padding(0);
+            root.Padding = new Padding(0);
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 74));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 62));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 136));
+            Controls.Add(root);
 
-            animTimer = new System.Windows.Forms.Timer();
-            animTimer.Interval = 15;
-            animTimer.Tick += OnAnimTick;
-            this.Shown += (s, e) => animTimer.Start();
+            Panel header = new Panel();
+            header.Dock = DockStyle.Fill;
+            header.BackColor = ColPanel;
+            header.Margin = new Padding(0);
+            TableLayoutPanel headerLayout = new TableLayoutPanel();
+            headerLayout.Dock = DockStyle.Fill;
+            headerLayout.ColumnCount = 1;
+            headerLayout.RowCount = 2;
+            headerLayout.Padding = new Padding(20, 8, 20, 6);
+            headerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+            headerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
+            lblTitle = new Label();
+            lblTitle.Text = "ДОСТУПНІ ОНОВЛЕННЯ МОДІВ";
+            lblTitle.Font = fontTitle;
+            lblTitle.ForeColor = ColText;
+            lblTitle.Dock = DockStyle.Fill;
+            lblTitle.TextAlign = ContentAlignment.MiddleLeft;
+            lblSubtitle = new Label();
+            lblSubtitle.Font = fontBase;
+            lblSubtitle.ForeColor = ColGold;
+            lblSubtitle.Dock = DockStyle.Fill;
+            lblSubtitle.TextAlign = ContentAlignment.MiddleLeft;
+            headerLayout.Controls.Add(lblTitle, 0, 0);
+            headerLayout.Controls.Add(lblSubtitle, 0, 1);
+            header.Controls.Add(headerLayout);
+            root.Controls.Add(header, 0, 0);
+
+            Panel launcherPanel = new Panel();
+            launcherPanel.Dock = DockStyle.Fill;
+            launcherPanel.BackColor = ColRow;
+            launcherPanel.Margin = new Padding(0);
+            TableLayoutPanel launcherLayout = new TableLayoutPanel();
+            launcherLayout.Dock = DockStyle.Fill;
+            launcherLayout.ColumnCount = 2;
+            launcherLayout.RowCount = 1;
+            launcherLayout.Padding = new Padding(20, 8, 20, 8);
+            launcherLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            launcherLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            chkLauncher = new CheckBox();
+            chkLauncher.AutoSize = true;
+            chkLauncher.Text = "Оновити лаунчер";
+            chkLauncher.ForeColor = ColText;
+            chkLauncher.Checked = launcherUpdate != null;
+            chkLauncher.Enabled = launcherUpdate != null;
+            chkLauncher.Visible = launcherUpdate != null;
+            chkLauncher.Anchor = AnchorStyles.Left;
+            chkLauncher.CheckedChanged += (s, e) => UpdateState();
+            lblLauncher = new Label();
+            lblLauncher.Dock = DockStyle.Fill;
+            lblLauncher.TextAlign = ContentAlignment.MiddleLeft;
+            lblLauncher.ForeColor = ColMuted;
+            if (launcherUpdate != null)
+                lblLauncher.Text = string.Format("Лаунчер: {0} → {1} — завантажиться після запуску, застосується при наступному старті", Program.LauncherVersion, launcherUpdate.version);
+            else
+                lblLauncher.Text = "Лаунчер актуальний: " + Program.LauncherVersion;
+            launcherLayout.Controls.Add(chkLauncher, 0, 0);
+            launcherLayout.Controls.Add(lblLauncher, 1, 0);
+            launcherPanel.Controls.Add(launcherLayout);
+            root.Controls.Add(launcherPanel, 0, 1);
+
+            lblUpdatesHeader = CreateHeaderLabel("ОНОВЛЕННЯ", ColGold);
+            lblNewHeader = CreateHeaderLabel("НОВІ МОДИ", ColGreen);
+            listUpdates = CreateList();
+            listNew = CreateList();
+            lblUpdatesEmpty = CreateEmptyLabel("Немає оновлень");
+            lblNewEmpty = CreateEmptyLabel("Немає нових модів");
+
+            TableLayoutPanel lists = new TableLayoutPanel();
+            lists.Dock = DockStyle.Fill;
+            lists.ColumnCount = 2;
+            lists.RowCount = 1;
+            lists.BackColor = ColBg;
+            lists.Padding = new Padding(16, 10, 16, 6);
+            lists.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            lists.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            lists.Controls.Add(CreateColumn(lblUpdatesHeader, listUpdates, lblUpdatesEmpty, new Padding(0, 0, 8, 0)), 0, 0);
+            lists.Controls.Add(CreateColumn(lblNewHeader, listNew, lblNewEmpty, new Padding(8, 0, 0, 0)), 1, 0);
+            root.Controls.Add(lists, 0, 2);
+
+            Panel footer = new Panel();
+            footer.Dock = DockStyle.Fill;
+            footer.BackColor = ColBg;
+            footer.Padding = new Padding(16, 4, 16, 10);
+            TableLayoutPanel footerLayout = new TableLayoutPanel();
+            footerLayout.Dock = DockStyle.Fill;
+            footerLayout.ColumnCount = 1;
+            footerLayout.RowCount = 3;
+            footerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
+            footerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 16));
+            footerLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+            lblStatus = new Label();
+            lblStatus.Dock = DockStyle.Fill;
+            lblStatus.TextAlign = ContentAlignment.MiddleLeft;
+            lblStatus.ForeColor = ColMuted;
+            progress = new ProgressBar();
+            progress.Dock = DockStyle.Fill;
+            progress.Minimum = 0;
+            progress.Maximum = 100;
+            progress.Value = 0;
+            progress.Style = ProgressBarStyle.Continuous;
+
+            FlowLayoutPanel buttons = new FlowLayoutPanel();
+            buttons.Dock = DockStyle.Fill;
+            buttons.FlowDirection = FlowDirection.LeftToRight;
+            buttons.WrapContents = true;
+            buttons.AutoScroll = false;
+            buttons.Padding = new Padding(0);
+            buttons.Margin = new Padding(0);
+
+            btnUpdate = CreateButton("Грати", 220, true);
+            btnSkip = CreateButton("Без оновлення", 150, false);
+            btnNoMods = CreateButton("Без модів", 130, false);
+            btnDecline = CreateButton("Більше не пропонувати", 180, false);
+            btnSelectAll = CreateButton("Вибрати все", 120, false);
+            btnSelectNone = CreateButton("Зняти все", 120, false);
+            btnDecline.BackColor = Color.FromArgb(54, 36, 42);
+            btnDecline.ForeColor = Color.FromArgb(240, 170, 170);
+            btnDecline.FlatAppearance.BorderColor = Color.FromArgb(96, 62, 70);
+
+            btnUpdate.Click += (s, e) => OnPrimary();
+            btnSkip.Click += (s, e) => OnSkip();
+            btnNoMods.Click += (s, e) => OnNoMods();
+            btnDecline.Click += (s, e) => OnDecline();
+            btnSelectAll.Click += (s, e) => SetAllChecked(true);
+            btnSelectNone.Click += (s, e) => SetAllChecked(false);
+
+            buttons.Controls.Add(btnUpdate);
+            buttons.Controls.Add(btnSkip);
+            buttons.Controls.Add(btnNoMods);
+            buttons.Controls.Add(btnDecline);
+            buttons.Controls.Add(btnSelectAll);
+            buttons.Controls.Add(btnSelectNone);
+            footerLayout.Controls.Add(lblStatus, 0, 0);
+            footerLayout.Controls.Add(progress, 0, 1);
+            footerLayout.Controls.Add(buttons, 0, 2);
+            footer.Controls.Add(footerLayout);
+            root.Controls.Add(footer, 0, 3);
+
+            AcceptButton = btnUpdate;
+            CancelButton = btnSkip;
+
+            LoadItems();
         }
 
-        protected override CreateParams CreateParams
+        private Label CreateHeaderLabel(string text, Color color)
         {
-            get
-            {
-                // CS_DROPSHADOW 0x00020000 gives frameless form native OS shadow — 2026-10-24
-                CreateParams cp = base.CreateParams;
-                cp.ClassStyle |= 0x00020000;
-                return cp;
-            }
+            Label label = new Label();
+            label.Text = text;
+            label.Dock = DockStyle.Fill;
+            label.TextAlign = ContentAlignment.MiddleLeft;
+            label.Font = fontHeader;
+            label.ForeColor = color;
+            return label;
         }
 
-        private void ComputeLayout()
+        private Label CreateEmptyLabel(string text)
         {
-            rectHeader = new Rectangle(0, 0, Width, 68);
-            rectClose = new Rectangle(Width - 42, 14, 28, 28);
-            rectListViewport = new Rectangle(20, 80, Width - 40, Height - 185);
-            rectProgressBar = new Rectangle(20, Height - 92, Width - 40, 14);
-            if (updates.Count > 0)
+            Label label = new Label();
+            label.Text = text;
+            label.Dock = DockStyle.Fill;
+            label.TextAlign = ContentAlignment.MiddleCenter;
+            label.ForeColor = ColMuted;
+            label.BackColor = ColList;
+            label.Visible = false;
+            return label;
+        }
+
+        private ListView CreateList()
+        {
+            ListView list = new ListView();
+            list.Dock = DockStyle.Fill;
+            list.View = View.Details;
+            list.FullRowSelect = true;
+            list.CheckBoxes = true;
+            list.HideSelection = false;
+            list.MultiSelect = false;
+            list.BorderStyle = BorderStyle.FixedSingle;
+            list.BackColor = ColList;
+            list.ForeColor = ColText;
+            list.Font = fontBase;
+            list.HeaderStyle = ColumnHeaderStyle.Nonclickable;
+            list.ShowItemToolTips = true;
+            list.Columns.Add("Мод", 160);
+            list.Columns.Add("Версія", 100);
+            list.Columns.Add("Зміни", 160);
+            list.Resize += (s, e) => FitColumns(list);
+            list.ItemChecked += List_ItemChecked;
+            return list;
+        }
+
+        private Control CreateColumn(Label header, ListView list, Label empty, Padding margin)
+        {
+            TableLayoutPanel col = new TableLayoutPanel();
+            col.Dock = DockStyle.Fill;
+            col.ColumnCount = 1;
+            col.RowCount = 2;
+            col.Margin = margin;
+            col.BackColor = ColBg;
+            col.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+            col.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            Panel box = new Panel();
+            box.Dock = DockStyle.Fill;
+            box.BackColor = ColBg;
+            box.Controls.Add(list);
+            box.Controls.Add(empty);
+            empty.BringToFront();
+            col.Controls.Add(header, 0, 0);
+            col.Controls.Add(box, 0, 1);
+            return col;
+        }
+
+        private Button CreateButton(string text, int width, bool primary)
+        {
+            Button button = new Button();
+            button.Text = text;
+            button.Width = width;
+            button.Height = 36;
+            button.Margin = new Padding(0, 4, 8, 4);
+            button.FlatStyle = FlatStyle.Flat;
+            button.UseVisualStyleBackColor = false;
+            button.Font = fontButton;
+            if (primary)
             {
-                int buttonWidth = (Width - 60) / 3;
-                rectBtnUpdate = new Rectangle(20, Height - 60, buttonWidth, 42);
-                rectBtnSkip = new Rectangle(20 + buttonWidth + 10, Height - 60, buttonWidth, 42);
-                rectBtnNoMods = new Rectangle(20 + 2 * (buttonWidth + 10), Height - 60, Width - 40 - 2 * (buttonWidth + 10), 42);
+                button.BackColor = ColGold;
+                button.ForeColor = Color.FromArgb(20, 24, 32);
+                button.FlatAppearance.BorderSize = 0;
             }
             else
             {
-                rectBtnUpdate = new Rectangle(20, Height - 60, 315, 42);
-                rectBtnSkip = Rectangle.Empty;
-                rectBtnNoMods = new Rectangle(348, Height - 60, Width - 368, 42);
+                button.BackColor = ColButton;
+                button.ForeColor = ColText;
+                button.FlatAppearance.BorderSize = 1;
+                button.FlatAppearance.BorderColor = ColButtonBorder;
             }
-
-            int totalListHeight = updates.Count * CardHeight + Math.Max(0, updates.Count - 1) * CardGap;
-            maxScroll = Math.Max(0, totalListHeight - rectListViewport.Height);
+            return button;
         }
 
-        private static float Lerp(float cur, float target, float speed)
+        private void LoadItems()
         {
-            float diff = target - cur;
-            if (Math.Abs(diff) < 0.004f) return target;
-            return cur + diff * speed;
+            isLoading = true;
+            foreach (PendingModUpdate item in updateItems)
+            {
+                ListViewItem row = new ListViewItem(item.Remote.title ?? item.Remote.id);
+                row.SubItems.Add(string.Format("{0} → {1}", item.InstalledVersion ?? "?", item.Remote.version));
+                row.SubItems.Add(item.Remote.changes ?? "Оновлення сумісності та покращення стабільності");
+                row.ToolTipText = item.Remote.changes ?? "";
+                row.Tag = item;
+                row.Checked = true;
+                listUpdates.Items.Add(row);
+            }
+            foreach (PendingModUpdate item in newItems)
+            {
+                ListViewItem row = new ListViewItem(item.Remote.title ?? item.Remote.id);
+                row.SubItems.Add("новий • " + item.Remote.version);
+                row.SubItems.Add(item.Remote.changes ?? "");
+                row.ToolTipText = item.Remote.changes ?? "";
+                row.Tag = item;
+                row.Checked = false;
+                listNew.Items.Add(row);
+            }
+            isLoading = false;
+            RefreshEmptyStates();
+            FitColumns(listUpdates);
+            FitColumns(listNew);
+            UpdateState();
         }
 
-        private void OnAnimTick(object sender, EventArgs e)
+        private void RefreshEmptyStates()
         {
-            bool dirty = false;
+            listUpdates.Visible = updateItems.Count > 0;
+            lblUpdatesEmpty.Visible = updateItems.Count == 0;
+            listNew.Visible = newItems.Count > 0;
+            lblNewEmpty.Visible = newItems.Count == 0;
+            if (lblUpdatesEmpty.Visible) lblUpdatesEmpty.BringToFront();
+            if (lblNewEmpty.Visible) lblNewEmpty.BringToFront();
+        }
 
-            if (fadeProgress < 1f)
+        private static void FitColumns(ListView list)
+        {
+            if (list.Columns.Count < 3) return;
+            int width = list.ClientSize.Width - list.Columns[0].Width - list.Columns[1].Width - 24;
+            if (width > 80) list.Columns[2].Width = width;
+        }
+
+        private void List_ItemChecked(object sender, ItemCheckedEventArgs e)
+        {
+            if (isLoading) return;
+            UpdateState();
+        }
+
+        private List<PendingModUpdate> GetChecked()
+        {
+            List<PendingModUpdate> result = new List<PendingModUpdate>();
+            foreach (ListViewItem row in listUpdates.CheckedItems)
             {
-                fadeProgress = Math.Min(1f, fadeProgress + 0.085f);
-                float eased = 1f - (float)Math.Pow(1f - fadeProgress, 3);
-                this.Opacity = eased;
-                dirty = true;
+                PendingModUpdate item = row.Tag as PendingModUpdate;
+                if (item != null) result.Add(item);
             }
-
-            float nextUpd = Lerp(btnUpdateHover, isHoverUpdate && !isUpdating ? 1f : 0f, 0.22f);
-            float nextSkip = Lerp(btnSkipHover, isHoverSkip && !isUpdating ? 1f : 0f, 0.22f);
-            float nextNoMods = Lerp(btnNoModsHover, isHoverNoMods && !isUpdating ? 1f : 0f, 0.22f);
-            float nextClose = Lerp(btnCloseHover, isHoverClose && !isUpdating ? 1f : 0f, 0.22f);
-            if (nextUpd != btnUpdateHover || nextSkip != btnSkipHover || nextNoMods != btnNoModsHover || nextClose != btnCloseHover)
+            foreach (ListViewItem row in listNew.CheckedItems)
             {
-                btnUpdateHover = nextUpd;
-                btnSkipHover = nextSkip;
-                btnNoModsHover = nextNoMods;
-                btnCloseHover = nextClose;
-                dirty = true;
+                PendingModUpdate item = row.Tag as PendingModUpdate;
+                if (item != null) result.Add(item);
             }
+            return result;
+        }
 
-            for (int i = 0; i < updates.Count; i++)
+        private void SetAllChecked(bool value)
+        {
+            if (isUpdating) return;
+            isLoading = true;
+            foreach (ListViewItem row in listUpdates.Items) row.Checked = value;
+            foreach (ListViewItem row in listNew.Items) row.Checked = value;
+            isLoading = false;
+            UpdateState();
+        }
+
+        private void UpdateState()
+        {
+            if (isUpdating || lblStatus == null) return;
+            int total = updateItems.Count + newItems.Count;
+            int checkedCount = GetChecked().Count;
+            lblUpdatesHeader.Text = "ОНОВЛЕННЯ (" + updateItems.Count + ")";
+            lblNewHeader.Text = "НОВІ МОДИ (" + newItems.Count + ")";
+            if (total == 0)
+                lblSubtitle.Text = "Оновлень модів немає • Клієнт WoT " + gameVer;
+            else
+                lblSubtitle.Text = string.Format("Оновлень: {0} • нових: {1} • Клієнт WoT {2}", updateItems.Count, newItems.Count, gameVer);
+            lblStatus.Text = total == 0
+                ? (launcherUpdate == null ? "Усі моди оновлені" : "Оновлень модів немає")
+                : string.Format("Вибрано: {0} із {1}", checkedCount, total);
+            bool launcherChecked = launcherUpdate != null && chkLauncher.Checked;
+            if (checkedCount > 0) btnUpdate.Text = "Оновити вибране і грати";
+            else if (launcherChecked) btnUpdate.Text = "Оновити лаунчер і грати";
+            else btnUpdate.Text = "Грати";
+            btnDecline.Enabled = checkedCount > 0;
+            btnSkip.Visible = total > 0;
+            btnDecline.Visible = total > 0;
+            btnSelectAll.Enabled = total > 0;
+            btnSelectNone.Enabled = total > 0;
+        }
+
+        private void OnPrimary()
+        {
+            if (isUpdating) return;
+            List<PendingModUpdate> selected = GetChecked();
+            if (selected.Count > 0) StartUpdateProcess(selected);
+            else Close();
+        }
+
+        private void OnSkip()
+        {
+            if (isUpdating) return;
+            chkLauncher.Checked = false;
+            Close();
+        }
+
+        private void OnNoMods()
+        {
+            if (isUpdating) return;
+            LaunchWithoutMods = true;
+            Close();
+        }
+
+        private void OnDecline()
+        {
+            if (isUpdating) return;
+            List<PendingModUpdate> selected = GetChecked();
+            if (selected.Count == 0)
             {
-                float target = (i == hoveredCardIndex) ? 1f : 0f;
-                float next = Lerp(updates[i].HoverProgress, target, 0.2f);
-                if (next != updates[i].HoverProgress)
+                MessageBox.Show("Познач моди, які більше не пропонувати.", "WoT Modpack",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            DialogResult answer = MessageBox.Show(
+                string.Format("Більше не пропонувати {0} мод(ів)?\nВони не будуть встановлюватися, оновлюватися чи пропонуватися.", selected.Count),
+                "WoT Modpack", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (answer != DialogResult.Yes) return;
+
+            List<string> ids = new List<string>();
+            foreach (PendingModUpdate item in selected) ids.Add(item.Remote.id);
+            Program.AddDeclinedMods(ids);
+            isLoading = true;
+            foreach (PendingModUpdate item in selected)
+            {
+                RemoveRow(listUpdates, item);
+                RemoveRow(listNew, item);
+                updateItems.Remove(item);
+                newItems.Remove(item);
+            }
+            isLoading = false;
+            RefreshEmptyStates();
+            UpdateState();
+        }
+
+        private static void RemoveRow(ListView list, PendingModUpdate target)
+        {
+            for (int i = list.Items.Count - 1; i >= 0; i--)
+            {
+                PendingModUpdate item = list.Items[i].Tag as PendingModUpdate;
+                if (item == target)
                 {
-                    updates[i].HoverProgress = next;
-                    dirty = true;
+                    list.Items.RemoveAt(i);
+                    return;
                 }
             }
+        }
 
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
             if (isUpdating)
             {
-                displayProgress = Lerp(displayProgress, targetProgress, 0.18f);
-                shimmerOffset += 6f;
-                if (shimmerOffset > Width) shimmerOffset = -120f;
-                dirty = true;
-            }
-
-            if (dirty) Invalidate();
-        }
-
-        protected override void OnMouseWheel(MouseEventArgs e)
-        {
-            base.OnMouseWheel(e);
-            if (maxScroll <= 0) return;
-            scrollOffset = Math.Max(0, Math.Min(maxScroll, scrollOffset - (e.Delta / 3)));
-            Invalidate(rectListViewport);
-        }
-
-        protected override void OnMouseDown(MouseEventArgs e)
-        {
-            base.OnMouseDown(e);
-            if (e.Button != MouseButtons.Left) return;
-
-            if (rectHeader.Contains(e.Location) && !rectClose.Contains(e.Location))
-            {
-                dragging = true;
-                dragStart = e.Location;
+                e.Cancel = true;
                 return;
             }
-
-            if (!isUpdating)
-            {
-                if (rectBtnUpdate.Contains(e.Location))
-                {
-                    if (updates.Count > 0)
-                        StartUpdateProcess();
-                    else
-                        this.Close();
-                }
-                else if (rectBtnNoMods.Contains(e.Location))
-                {
-                    LaunchWithoutMods = true;
-                    this.Close();
-                }
-                else if (rectBtnSkip.Contains(e.Location) || rectClose.Contains(e.Location))
-                    this.Close();
-            }
+            ApplyLauncherUpdate = launcherUpdate != null && chkLauncher.Checked;
+            base.OnFormClosing(e);
         }
 
-        protected override void OnMouseMove(MouseEventArgs e)
-        {
-            base.OnMouseMove(e);
-            if (dragging)
-            {
-                Point p = PointToScreen(e.Location);
-                Location = new Point(p.X - dragStart.X, p.Y - dragStart.Y);
-                return;
-            }
-
-            isHoverUpdate = rectBtnUpdate.Contains(e.Location);
-            isHoverSkip = rectBtnSkip.Contains(e.Location);
-            isHoverNoMods = rectBtnNoMods.Contains(e.Location);
-            isHoverClose = rectClose.Contains(e.Location);
-
-            int newHoverCard = -1;
-            if (rectListViewport.Contains(e.Location))
-            {
-                int relY = e.Y - rectListViewport.Y + scrollOffset;
-                int idx = relY / (CardHeight + CardGap);
-                int inCardY = relY % (CardHeight + CardGap);
-                if (idx >= 0 && idx < updates.Count && inCardY <= CardHeight)
-                    newHoverCard = idx;
-            }
-            hoveredCardIndex = newHoverCard;
-
-            Cursor = (!isUpdating && (isHoverUpdate || isHoverSkip || isHoverNoMods || isHoverClose))
-                ? Cursors.Hand
-                : Cursors.Default;
-        }
-
-        protected override void OnMouseUp(MouseEventArgs e)
-        {
-            base.OnMouseUp(e);
-            dragging = false;
-        }
-
-        protected override void OnMouseLeave(EventArgs e)
-        {
-            base.OnMouseLeave(e);
-            isHoverUpdate = isHoverSkip = isHoverNoMods = isHoverClose = false;
-            hoveredCardIndex = -1;
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            Graphics g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-
-            g.FillRectangle(brushBg, ClientRectangle);
-            g.FillRectangle(brushHeader, rectHeader);
-            g.DrawLine(penAccentTop, 0, 1, Width, 1);
-
-            g.DrawString(updates.Count > 0 ? "ДОСТУПНІ ОНОВЛЕННЯ МОДІВ" : "МОДИ ОНОВЛЕНІ",
-                fontTitle, brushTextMain, 20f, 12f);
-            g.DrawString(
-                string.Format("{0} • Клієнт WoT {1}",
-                    updates.Count > 0 ? string.Format("Знайдено нових оновлень: {0}", updates.Count) : "Оновлень немає",
-                    gameVer),
-                fontSubtitle, brushGold, 21f, 40f);
-
-            DrawCloseButton(g);
-            DrawCardsList(g);
-            DrawFooter(g);
-
-            g.DrawRectangle(penBorder, 0, 0, Width - 1, Height - 1);
-        }
-
-        private void DrawCloseButton(Graphics g)
-        {
-            if (btnCloseHover > 0.01f)
-            {
-                int a = (int)(btnCloseHover * 180);
-                using (var br = new SolidBrush(Color.FromArgb(a, 190, 50, 50)))
-                    FillRoundedRect(g, br, rectClose, 5);
-            }
-            using (var p = new Pen(Color.FromArgb(200, 210, 225), 1.8f))
-            {
-                int cx = rectClose.X + rectClose.Width / 2;
-                int cy = rectClose.Y + rectClose.Height / 2;
-                g.DrawLine(p, cx - 5, cy - 5, cx + 5, cy + 5);
-                g.DrawLine(p, cx + 5, cy - 5, cx - 5, cy + 5);
-            }
-        }
-
-        private void DrawCardsList(Graphics g)
-        {
-            GraphicsState state = g.Save();
-            g.SetClip(rectListViewport);
-
-            if (updates.Count == 0)
-            {
-                StringFormat emptySf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-                g.DrawString("Усі моди оновлені. Можна запускати гру.", fontChanges, brushTextMuted, rectListViewport, emptySf);
-                g.Restore(state);
-                return;
-            }
-
-            for (int i = 0; i < updates.Count; i++)
-            {
-                PendingModUpdate item = updates[i];
-                int cardY = rectListViewport.Y + i * (CardHeight + CardGap) - scrollOffset;
-                if (cardY + CardHeight < rectListViewport.Y || cardY > rectListViewport.Bottom)
-                    continue;
-
-                Rectangle cardRect = new Rectangle(rectListViewport.X, cardY, rectListViewport.Width - (maxScroll > 0 ? 10 : 0), CardHeight);
-                int baseR = 26 + (int)(item.HoverProgress * 12);
-                int baseG = 33 + (int)(item.HoverProgress * 15);
-                int baseB = 47 + (int)(item.HoverProgress * 20);
-
-                using (var brCard = new SolidBrush(Color.FromArgb(baseR, baseG, baseB)))
-                    FillRoundedRect(g, brCard, cardRect, 7);
-
-                Color borderCol = item.HoverProgress > 0.05f
-                    ? Color.FromArgb((int)(80 + item.HoverProgress * 140), 229, 154, 40)
-                    : Color.FromArgb(42, 52, 72);
-                using (var pCard = new Pen(borderCol, 1f))
-                    DrawRoundedRect(g, pCard, cardRect, 7);
-
-                g.DrawString(item.Remote.title ?? item.Remote.id, fontModTitle, brushTextMain, cardRect.X + 14, cardRect.Y + 10);
-
-                string badgeText = item.IsNew
-                    ? string.Format("новий • v{0}", item.Remote.version)
-                    : string.Format("v{0} → v{1}", item.InstalledVersion, item.Remote.version);
-                SizeF badgeSize = g.MeasureString(badgeText, fontBadge);
-                int badgeW = (int)badgeSize.Width + 14;
-                Rectangle badgeRect = new Rectangle(cardRect.Right - badgeW - 14, cardRect.Y + 10, badgeW, 22);
-                FillRoundedRect(g, brushBadgeBg, badgeRect, 4);
-                g.DrawString(badgeText, fontBadge, brushBadgeFg, badgeRect.X + 7, badgeRect.Y + 3);
-
-                string changes = string.IsNullOrEmpty(item.Remote.changes)
-                    ? "Оновлення сумісності та покращення стабільності"
-                    : item.Remote.changes;
-                RectangleF changesRect = new RectangleF(cardRect.X + 14, cardRect.Y + 36, cardRect.Width - 28, 24);
-                StringFormat sf = new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
-                g.DrawString(changes, fontChanges, brushTextMuted, changesRect, sf);
-            }
-
-            if (maxScroll > 0)
-            {
-                int trackX = rectListViewport.Right - 5;
-                int thumbH = Math.Max(28, (int)((float)rectListViewport.Height / (rectListViewport.Height + maxScroll) * rectListViewport.Height));
-                int thumbY = rectListViewport.Y + (int)((float)scrollOffset / maxScroll * (rectListViewport.Height - thumbH));
-                using (var brThumb = new SolidBrush(Color.FromArgb(90, 110, 140)))
-                    FillRoundedRect(g, brThumb, new Rectangle(trackX, thumbY, 4, thumbH), 2);
-            }
-
-            g.Restore(state);
-        }
-
-        private void DrawFooter(Graphics g)
-        {
-            g.DrawString(statusText, fontStatus, brushTextMuted, 20f, Height - 115f);
-
-            if (isUpdating || displayProgress > 0.01f)
-            {
-                using (var brTrack = new SolidBrush(Color.FromArgb(28, 35, 48)))
-                    FillRoundedRect(g, brTrack, rectProgressBar, 6);
-
-                int fillW = Math.Max(8, (int)(rectProgressBar.Width * (displayProgress / 100f)));
-                Rectangle fillRect = new Rectangle(rectProgressBar.X, rectProgressBar.Y, Math.Min(rectProgressBar.Width, fillW), rectProgressBar.Height);
-                using (var brFill = new LinearGradientBrush(fillRect, Color.FromArgb(215, 130, 25), Color.FromArgb(245, 180, 55), LinearGradientMode.Horizontal))
-                    FillRoundedRect(g, brFill, fillRect, 6);
-
-                GraphicsState st = g.Save();
-                g.SetClip(fillRect);
-                Rectangle shimRect = new Rectangle((int)shimmerOffset, rectProgressBar.Y, 90, rectProgressBar.Height);
-                using (var brShim = new LinearGradientBrush(shimRect, Color.FromArgb(0, 255, 255, 255), Color.FromArgb(95, 255, 255, 255), LinearGradientMode.Horizontal))
-                    g.FillRectangle(brShim, shimRect);
-                g.Restore(st);
-            }
-
-            Color cUpd1 = Color.FromArgb(210 + (int)(btnUpdateHover * 25), 125 + (int)(btnUpdateHover * 25), 22);
-            Color cUpd2 = Color.FromArgb(235 + (int)(btnUpdateHover * 20), 162 + (int)(btnUpdateHover * 25), 42);
-            if (isUpdating)
-                cUpd1 = cUpd2 = Color.FromArgb(75, 85, 100);
-
-            using (var brUpd = new LinearGradientBrush(rectBtnUpdate, cUpd1, cUpd2, LinearGradientMode.Vertical))
-                FillRoundedRect(g, brUpd, rectBtnUpdate, 6);
-
-            StringFormat centerSf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-            string updateLabel = isUpdating ? "Оновлюємо моди..." : (updates.Count > 0 ? "Оновити і грати" : "Грати");
-            g.DrawString(updateLabel, fontButton, brushTextMain, rectBtnUpdate, centerSf);
-
-            if (updates.Count > 0)
-            {
-                int skipBg = 32 + (int)(btnSkipHover * 18);
-                using (var brSkip = new SolidBrush(Color.FromArgb(skipBg, skipBg + 7, skipBg + 18)))
-                    FillRoundedRect(g, brSkip, rectBtnSkip, 6);
-                using (var pSkip = new Pen(Color.FromArgb(60 + (int)(btnSkipHover * 60), 75 + (int)(btnSkipHover * 60), 100), 1f))
-                    DrawRoundedRect(g, pSkip, rectBtnSkip, 6);
-                g.DrawString("Без оновлення", fontButton, brushTextMuted, rectBtnSkip, centerSf);
-            }
-
-            int noModsBg = 32 + (int)(btnNoModsHover * 18);
-            using (var brNoMods = new SolidBrush(Color.FromArgb(noModsBg, noModsBg + 7, noModsBg + 18)))
-                FillRoundedRect(g, brNoMods, rectBtnNoMods, 6);
-            using (var pNoMods = new Pen(Color.FromArgb(60 + (int)(btnNoModsHover * 60), 75 + (int)(btnNoModsHover * 60), 100), 1f))
-                DrawRoundedRect(g, pNoMods, rectBtnNoMods, 6);
-            g.DrawString("Без модів", fontButton, brushTextMuted, rectBtnNoMods, centerSf);
-        }
-
-        private static GraphicsPath CreateRoundPath(Rectangle r, int radius)
-        {
-            int d = radius * 2;
-            GraphicsPath path = new GraphicsPath();
-            path.AddArc(r.X, r.Y, d, d, 180, 90);
-            path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-            path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-            path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
-            path.CloseFigure();
-            return path;
-        }
-
-        private static void FillRoundedRect(Graphics g, Brush br, Rectangle r, int radius)
-        {
-            if (r.Width <= 0 || r.Height <= 0) return;
-            using (GraphicsPath path = CreateRoundPath(r, radius))
-                g.FillPath(br, path);
-        }
-
-        private static void DrawRoundedRect(Graphics g, Pen pen, Rectangle r, int radius)
-        {
-            if (r.Width <= 0 || r.Height <= 0) return;
-            using (GraphicsPath path = CreateRoundPath(r, radius))
-                g.DrawPath(pen, path);
-        }
-
-        private void StartUpdateProcess()
+        private void StartUpdateProcess(List<PendingModUpdate> selected)
         {
             if (isUpdating) return;
             isUpdating = true;
-            statusText = "Підготовка резервної копії...";
-            targetProgress = 5f;
-            Invalidate();
-
-            Thread worker = new Thread(RunUpdateWorker);
+            btnUpdate.Enabled = false;
+            btnSkip.Enabled = false;
+            btnNoMods.Enabled = false;
+            btnDecline.Enabled = false;
+            btnSelectAll.Enabled = false;
+            btnSelectNone.Enabled = false;
+            listUpdates.Enabled = false;
+            listNew.Enabled = false;
+            ControlBox = false;
+            progress.Value = 0;
+            lblStatus.Text = "Підготовка резервної копії...";
+            Thread worker = new Thread(() => RunUpdateWorker(selected));
             worker.IsBackground = true;
             worker.Start();
         }
 
-        private void RunUpdateWorker()
+        private void RunUpdateWorker(List<PendingModUpdate> selected)
         {
             string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
             string bkpDir = Path.Combine(gamePath, ".backups", "launcher", stamp);
-            var replacedPairs = new List<string[]>();
+            List<string[]> replacedPairs = new List<string[]>();
 
             try
             {
                 Directory.CreateDirectory(bkpDir);
-                int total = updates.Count;
-
+                int total = selected.Count;
                 for (int i = 0; i < total; i++)
                 {
-                    PendingModUpdate u = updates[i];
-                    ManifestModEntry rem = u.Remote;
-                    statusText = string.Format("Завантаження ({0}/{1}): {2} v{3}...", i + 1, total, rem.title ?? rem.id, rem.version);
-                    targetProgress = 8f + (i * 85f / total);
+                    PendingModUpdate update = selected[i];
+                    ManifestModEntry remote = update.Remote;
+                    SetStatus(string.Format("Завантаження ({0}/{1}): {2} v{3}...", i + 1, total, remote.title ?? remote.id, remote.version));
 
                     string tmpFile = Path.Combine(Path.GetTempPath(), "wot-upd-" + Guid.NewGuid().ToString("N") + ".wotmod");
-                    DownloadFileWithProgress(rem.url, tmpFile, i, total);
+                    DownloadFileWithProgress(remote.url, tmpFile, i, total);
 
-                    if (rem.size > 0 && new FileInfo(tmpFile).Length != rem.size)
+                    if (remote.size > 0 && new FileInfo(tmpFile).Length != remote.size)
                     {
                         File.Delete(tmpFile);
-                        throw new InvalidDataException("Розмір файлу не збігається для " + rem.file);
+                        throw new InvalidDataException("Розмір файлу не збігається для " + remote.file);
                     }
-                    if (!string.IsNullOrEmpty(rem.sha256) && !Program.VerifySha256(tmpFile, rem.sha256))
+                    if (!string.IsNullOrEmpty(remote.sha256) && !Program.VerifySha256(tmpFile, remote.sha256))
                     {
                         File.Delete(tmpFile);
-                        throw new InvalidDataException("Контрольна сума SHA-256 не збігається для " + rem.file);
+                        throw new InvalidDataException("Контрольна сума SHA-256 не збігається для " + remote.file);
                     }
-                    if (!Program.VerifyWotmodArchive(tmpFile, rem.id))
+                    if (!Program.VerifyWotmodArchive(tmpFile, remote.id))
                     {
                         File.Delete(tmpFile);
-                        throw new InvalidDataException("Пакет .wotmod пошкоджений або має інший ID: " + rem.file);
+                        throw new InvalidDataException("Пакет .wotmod пошкоджений або має інший ID: " + remote.file);
                     }
 
-                    string destDir = Path.GetDirectoryName(u.LocalFilePath);
+                    string destDir = Path.GetDirectoryName(update.LocalFilePath);
                     Directory.CreateDirectory(destDir);
-
-                    if (u.IsNew)
+                    if (update.IsNew)
                     {
-                        string newFile = Path.Combine(destDir, rem.file);
+                        string newFile = Path.Combine(destDir, remote.file);
                         if (File.Exists(newFile)) File.Delete(newFile);
                         File.Move(tmpFile, newFile);
                         replacedPairs.Add(new string[] { null, newFile, newFile });
+                        SetProgress((int)((i + 1) * 100.0 / total));
                         continue;
                     }
 
-                    string relOld = u.LocalFilePath.Substring(gamePath.Length).TrimStart('\\', '/');
+                    string relOld = update.LocalFilePath.Substring(gamePath.Length).TrimStart('\\', '/');
                     string bkpFile = Path.Combine(bkpDir, relOld);
                     Directory.CreateDirectory(Path.GetDirectoryName(bkpFile));
-                    File.Copy(u.LocalFilePath, bkpFile, true);
+                    File.Copy(update.LocalFilePath, bkpFile, true);
 
-                    string newDestPath = Path.Combine(destDir, rem.file);
-
-                    File.Delete(u.LocalFilePath);
+                    string newDestPath = Path.Combine(destDir, remote.file);
+                    File.Delete(update.LocalFilePath);
                     if (File.Exists(newDestPath)) File.Delete(newDestPath);
                     File.Move(tmpFile, newDestPath);
-
-                    replacedPairs.Add(new string[] { bkpFile, u.LocalFilePath, newDestPath });
+                    replacedPairs.Add(new string[] { bkpFile, update.LocalFilePath, newDestPath });
+                    SetProgress((int)((i + 1) * 100.0 / total));
                 }
 
-                targetProgress = 100f;
-                statusText = "Усі моди оновлено! Запускаємо гру...";
+                SetProgress(100);
+                SetStatus("Усі вибрані моди оновлено. Запускаємо гру...");
                 Thread.Sleep(350);
-                this.BeginInvoke(new Action(() => this.Close()));
+                BeginInvoke(new Action(() =>
+                {
+                    isUpdating = false;
+                    Close();
+                }));
             }
             catch (Exception ex)
             {
@@ -1489,14 +1693,13 @@ namespace WotModLauncher
                     catch { }
                 }
 
-                this.BeginInvoke(new Action(() =>
+                BeginInvoke(new Action(() =>
                 {
+                    isUpdating = false;
                     MessageBox.Show(
                         "Оновлення не вдалося (" + ex.Message + ").\nВідновлено попередні версії модів, запускаємо гру.",
-                        "WoT Modpack Launcher",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Warning);
-                    this.Close();
+                        "WoT Modpack Launcher", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    Close();
                 }));
             }
         }
@@ -1507,7 +1710,7 @@ namespace WotModLauncher
             if (localSrc != null)
             {
                 File.Copy(localSrc, dstPath, true);
-                if (total > 0) targetProgress = 8f + ((index + 1f) * 85f / total);
+                SetProgress((int)((index + 1) * 100.0 / total));
                 return;
             }
 
@@ -1516,47 +1719,59 @@ namespace WotModLauncher
             req.Timeout = 15000;
             req.ReadWriteTimeout = 15000;
             using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
-            using (Stream s = resp.GetResponseStream())
-            using (FileStream fs = File.Create(dstPath))
+            using (Stream stream = resp.GetResponseStream())
+            using (FileStream file = File.Create(dstPath))
             {
-                long len = resp.ContentLength;
-                byte[] buf = new byte[16384];
+                long length = resp.ContentLength;
+                byte[] buffer = new byte[16384];
                 long readTotal = 0;
+                int lastPct = -1;
                 int n;
-                while ((n = s.Read(buf, 0, buf.Length)) > 0)
+                while ((n = stream.Read(buffer, 0, buffer.Length)) > 0)
                 {
-                    fs.Write(buf, 0, n);
+                    file.Write(buffer, 0, n);
                     readTotal += n;
-                    if (len > 0)
+                    if (length > 0)
                     {
-                        float fileFrac = (float)readTotal / len;
-                        targetProgress = 8f + ((index + fileFrac) * 85f / total);
+                        int pct = (int)((index + (float)readTotal / length) * 100.0 / total);
+                        if (pct != lastPct)
+                        {
+                            lastPct = pct;
+                            SetProgress(pct);
+                        }
                     }
                 }
             }
+        }
+
+        private void SetStatus(string text)
+        {
+            try
+            {
+                if (IsDisposed) return;
+                BeginInvoke(new Action(() => { lblStatus.Text = text; }));
+            }
+            catch { }
+        }
+
+        private void SetProgress(int value)
+        {
+            try
+            {
+                if (IsDisposed) return;
+                BeginInvoke(new Action(() => { progress.Value = Math.Max(0, Math.Min(100, value)); }));
+            }
+            catch { }
         }
 
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
-                if (animTimer != null) animTimer.Dispose();
+                fontBase.Dispose();
                 fontTitle.Dispose();
-                fontSubtitle.Dispose();
-                fontModTitle.Dispose();
-                fontBadge.Dispose();
-                fontChanges.Dispose();
+                fontHeader.Dispose();
                 fontButton.Dispose();
-                fontStatus.Dispose();
-                brushBg.Dispose();
-                brushHeader.Dispose();
-                brushGold.Dispose();
-                brushTextMain.Dispose();
-                brushTextMuted.Dispose();
-                brushBadgeBg.Dispose();
-                brushBadgeFg.Dispose();
-                penBorder.Dispose();
-                penAccentTop.Dispose();
             }
             base.Dispose(disposing);
         }

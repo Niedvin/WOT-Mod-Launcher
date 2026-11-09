@@ -2068,8 +2068,17 @@ namespace WotModpackInstaller
                     selectedIds.Add(mod.id);
             var skipMods = new List<string>();
             foreach (ModItem mod in loadedMods)
-                if (!mod.required && !string.IsNullOrEmpty(mod.id) && !selectedIds.Contains(mod.id))
-                    skipMods.Add(mod.id);
+            {
+                if (mod.required || string.IsNullOrEmpty(mod.id) || selectedIds.Contains(mod.id)) continue;
+                skipMods.Add(mod.id);
+                // unchecked package can span several manifest ids (GPU Boost) — 2026-11-09
+                if (mod.remote_files != null)
+                    foreach (RemoteFile rf in mod.remote_files)
+                        if (!string.IsNullOrEmpty(rf.id) && !skipMods.Contains(rf.id)) skipMods.Add(rf.id);
+                if (mod.updates != null)
+                    foreach (UpdateSource us in mod.updates)
+                        if (!string.IsNullOrEmpty(us.id) && !skipMods.Contains(us.id)) skipMods.Add(us.id);
+            }
 
             var ser = new JavaScriptSerializer();
             string cfgJson = ser.Serialize(new Dictionary<string, object>
