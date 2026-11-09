@@ -21,8 +21,8 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("Niedvin")]
 [assembly: AssemblyProduct("WoT Modpack by Niedvin")]
 [assembly: AssemblyCopyright("Copyright © 2026 Niedvin")]
-[assembly: AssemblyFileVersion("1.4.0.0")]
-[assembly: AssemblyVersion("1.4.0.0")]
+[assembly: AssemblyFileVersion("1.4.1.0")]
+[assembly: AssemblyVersion("1.4.1.0")]
 
 namespace WotModLauncher
 {
@@ -150,12 +150,14 @@ namespace WotModLauncher
             bool checkOnly = false;
             bool updateOnly = false;
             bool selfUpdateMode = false;
+            bool startWithoutMods = false;
             string argGamePath = null;
             for (int i = 0; i < args.Length; i++)
             {
                 if (args[i] == "--check-only") checkOnly = true;
                 else if (args[i] == "--update-only") updateOnly = true;
                 else if (args[i] == "--self-update") selfUpdateMode = true;
+                else if (args[i] == "--no-mods") startWithoutMods = true;
                 else if (args[i] == "--game" && i + 1 < args.Length) argGamePath = args[++i];
                 else if (args[i] == "--manifest" && i + 1 < args.Length) ManifestOverride = args[++i];
             }
@@ -186,6 +188,14 @@ namespace WotModLauncher
             if (cfg.hijack_shortcuts)
                 EnsureShortcutsRedirected(cfg.game_path);
 
+            if (startWithoutMods && !checkOnly && !updateOnly)
+            {
+                string cleanVer = DetectGameVersion(cfg.game_path);
+                DisableMods(cfg.game_path, cleanVer);
+                LaunchGame(cfg.game_path);
+                return 0;
+            }
+
             string gameVer = DetectGameVersion(cfg.game_path);
             RestoreDisabledMods(cfg.game_path);
             if (!string.IsNullOrEmpty(gameVer))
@@ -200,7 +210,7 @@ namespace WotModLauncher
                 selfUpdatePlan = GetSelfUpdatePlan(manifest.launcher);
                 if (string.IsNullOrEmpty(activeVer)) activeVer = manifest.game_version;
                 List<PendingModUpdate> updates = FindPendingUpdates(cfg.game_path, activeVer, manifest, cfg.skip_mods);
-                if (!checkOnly && (updates.Count > 0 || !updateOnly))
+                if (!checkOnly && updates.Count > 0)
                 {
                     using (var form = new UpdateDialogForm(cfg.game_path, activeVer, updates))
                     {

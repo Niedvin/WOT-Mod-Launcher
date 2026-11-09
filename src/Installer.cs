@@ -2095,6 +2095,7 @@ namespace WotModpackInstaller
                 string startMenuDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Microsoft\Windows\Start Menu\Programs\Wot Modpack");
                 TryCreateShortcut(Path.Combine(startMenuDir, "World of Tanks EU (модпак).lnk"), dstExe, "", gamePath, iconFile, 0, "Запуск World of Tanks з автооновленням модів", "меню Пуск: Wot Modpack");
             }
+            TryCreateShortcut(Path.Combine(desktopDir, "World of Tanks EU (без модів).lnk"), dstExe, "--no-mods", gamePath, iconFile, 0, "Запуск World of Tanks без модів", "World of Tanks EU (без модів).lnk");
 
             if (hijackStandard)
             {
@@ -2240,6 +2241,13 @@ namespace WotModpackInstaller
             {
                 File.Delete(modShortcut);
                 logger("[Видалення] Прибрано ярлик World of Tanks EU (модпак).lnk");
+            }
+
+            string cleanShortcut = Path.Combine(desktopDir, "World of Tanks EU (без модів).lnk");
+            if (File.Exists(cleanShortcut))
+            {
+                File.Delete(cleanShortcut);
+                logger("[Видалення] Прибрано ярлик World of Tanks EU (без модів).lnk");
             }
 
             string startMenuModShortcut = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Microsoft\Windows\Start Menu\Programs\Wot Modpack\World of Tanks EU (модпак).lnk");
