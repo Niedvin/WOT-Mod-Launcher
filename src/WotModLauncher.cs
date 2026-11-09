@@ -21,8 +21,8 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("Niedvin")]
 [assembly: AssemblyProduct("WoT Modpack by Niedvin")]
 [assembly: AssemblyCopyright("Copyright © 2026 Niedvin")]
-[assembly: AssemblyFileVersion("1.3.0.0")]
-[assembly: AssemblyVersion("1.3.0.0")]
+[assembly: AssemblyFileVersion("1.4.0.0")]
+[assembly: AssemblyVersion("1.4.0.0")]
 
 namespace WotModLauncher
 {
@@ -187,20 +187,25 @@ namespace WotModLauncher
                 EnsureShortcutsRedirected(cfg.game_path);
 
             string gameVer = DetectGameVersion(cfg.game_path);
+            RestoreDisabledMods(cfg.game_path);
             if (!string.IsNullOrEmpty(gameVer))
                 SyncVersionFolderIfEmpty(cfg.game_path, gameVer);
 
+            string activeVer = gameVer;
+            bool launchWithoutMods = false;
             SelfUpdateState selfUpdatePlan = null;
             ManifestRoot manifest = FetchManifestWithTimeout(4000);
             if (manifest != null)
             {
                 selfUpdatePlan = GetSelfUpdatePlan(manifest.launcher);
-                List<PendingModUpdate> updates = FindPendingUpdates(cfg.game_path, gameVer, manifest, cfg.skip_mods);
-                if (updates.Count > 0 && !checkOnly)
+                if (string.IsNullOrEmpty(activeVer)) activeVer = manifest.game_version;
+                List<PendingModUpdate> updates = FindPendingUpdates(cfg.game_path, activeVer, manifest, cfg.skip_mods);
+                if (!checkOnly && (updates.Count > 0 || !updateOnly))
                 {
-                    using (var form = new UpdateDialogForm(cfg.game_path, gameVer, updates))
+                    using (var form = new UpdateDialogForm(cfg.game_path, activeVer, updates))
                     {
                         Application.Run(form);
+                        launchWithoutMods = form.LaunchWithoutMods;
                     }
                 }
             }
@@ -209,6 +214,8 @@ namespace WotModLauncher
 
             if (!checkOnly && !updateOnly)
             {
+                if (launchWithoutMods)
+                    DisableMods(cfg.game_path, activeVer);
                 LaunchGame(cfg.game_path);
                 if (selfUpdatePlan != null)
                     StartBackgroundSelfUpdate(selfUpdatePlan);
@@ -846,24 +853,6 @@ namespace WotModLauncher
         public static void LaunchGame(string gamePath)
         {
             if (string.IsNullOrEmpty(gamePath)) return;
-            string exe = Path.Combine(gamePath, "WorldOfTanks.exe");
-            if (!File.Exists(exe))
-                exe = Path.Combine(gamePath, "win64", "WorldOfTanks.exe");
-
-            if (File.Exists(exe))
-            {
-                try
-                {
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = exe,
-                        WorkingDirectory = gamePath
-                    });
-                    return;
-                }
-                catch { }
-            }
-
             string wgcApi = Path.Combine(gamePath, "wgc_api.exe");
             if (File.Exists(wgcApi))
             {
@@ -875,9 +864,76 @@ namespace WotModLauncher
                         Arguments = "--open",
                         WorkingDirectory = gamePath
                     });
+                    return;
                 }
                 catch { }
             }
+
+            string exe = Path.Combine(gamePath, "WorldOfTanks.exe");
+            if (!File.Exists(exe))
+                exe = Path.Combine(gamePath, "win64", "WorldOfTanks.exe");
+            if (!File.Exists(exe)) return;
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = exe,
+                    WorkingDirectory = gamePath
+                });
+            }
+            catch { }
+        }
+
+        private static void CopyMissing(string source, string target)
+        {
+            Directory.CreateDirectory(target);
+            foreach (string file in Directory.GetFiles(source))
+            {
+                string destination = Path.Combine(target, Path.GetFileName(file));
+                if (!File.Exists(destination))
+                    File.Copy(file, destination, false);
+            }
+            foreach (string directory in Directory.GetDirectories(source))
+                CopyMissing(directory, Path.Combine(target, Path.GetFileName(directory)));
+        }
+
+        public static void RestoreDisabledMods(string gamePath)
+        {
+            try
+            {
+                string modsRoot = Path.Combine(gamePath, "mods");
+                if (!Directory.Exists(modsRoot)) return;
+                foreach (string disabled in Directory.GetDirectories(modsRoot, "*.disabled"))
+                {
+                    string active = disabled.Substring(0, disabled.Length - ".disabled".Length);
+                    if (Directory.Exists(active))
+                    {
+                        CopyMissing(disabled, active);
+                        Directory.Delete(disabled, true);
+                    }
+                    else
+                    {
+                        Directory.Move(disabled, active);
+                    }
+                }
+            }
+            catch { }
+        }
+
+        public static void DisableMods(string gamePath, string gameVer)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(gameVer)) return;
+                string modsRoot = Path.Combine(gamePath, "mods");
+                string active = Path.Combine(modsRoot, gameVer);
+                if (!Directory.Exists(active)) return;
+                RestoreDisabledMods(gamePath);
+                string disabled = active + ".disabled";
+                if (Directory.Exists(disabled)) return;
+                Directory.Move(active, disabled);
+            }
+            catch { }
         }
     }
 
@@ -891,10 +947,13 @@ namespace WotModLauncher
         private float fadeProgress = 0f;
         private float btnUpdateHover = 0f;
         private float btnSkipHover = 0f;
+        private float btnNoModsHover = 0f;
         private float btnCloseHover = 0f;
         private bool isHoverUpdate = false;
         private bool isHoverSkip = false;
+        private bool isHoverNoMods = false;
         private bool isHoverClose = false;
+        public bool LaunchWithoutMods { get; private set; }
         private int hoveredCardIndex = -1;
         private int scrollOffset = 0;
         private int maxScroll = 0;
@@ -913,6 +972,7 @@ namespace WotModLauncher
         private Rectangle rectListViewport;
         private Rectangle rectBtnUpdate;
         private Rectangle rectBtnSkip;
+        private Rectangle rectBtnNoMods;
         private Rectangle rectProgressBar;
 
         private readonly Font fontTitle = new Font("Segoe UI", 13.5f, FontStyle.Bold, GraphicsUnit.Point);
@@ -941,6 +1001,8 @@ namespace WotModLauncher
             this.gamePath = gamePath;
             this.gameVer = gameVer;
             this.updates = updates;
+            if (updates.Count == 0)
+                statusText = "Оновлень немає";
 
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.CenterScreen;
@@ -984,8 +1046,19 @@ namespace WotModLauncher
             rectClose = new Rectangle(Width - 42, 14, 28, 28);
             rectListViewport = new Rectangle(20, 80, Width - 40, Height - 185);
             rectProgressBar = new Rectangle(20, Height - 92, Width - 40, 14);
-            rectBtnUpdate = new Rectangle(20, Height - 60, 315, 42);
-            rectBtnSkip = new Rectangle(348, Height - 60, Width - 368, 42);
+            if (updates.Count > 0)
+            {
+                int buttonWidth = (Width - 60) / 3;
+                rectBtnUpdate = new Rectangle(20, Height - 60, buttonWidth, 42);
+                rectBtnSkip = new Rectangle(20 + buttonWidth + 10, Height - 60, buttonWidth, 42);
+                rectBtnNoMods = new Rectangle(20 + 2 * (buttonWidth + 10), Height - 60, Width - 40 - 2 * (buttonWidth + 10), 42);
+            }
+            else
+            {
+                rectBtnUpdate = new Rectangle(20, Height - 60, 315, 42);
+                rectBtnSkip = Rectangle.Empty;
+                rectBtnNoMods = new Rectangle(348, Height - 60, Width - 368, 42);
+            }
 
             int totalListHeight = updates.Count * CardHeight + Math.Max(0, updates.Count - 1) * CardGap;
             maxScroll = Math.Max(0, totalListHeight - rectListViewport.Height);
@@ -1012,11 +1085,13 @@ namespace WotModLauncher
 
             float nextUpd = Lerp(btnUpdateHover, isHoverUpdate && !isUpdating ? 1f : 0f, 0.22f);
             float nextSkip = Lerp(btnSkipHover, isHoverSkip && !isUpdating ? 1f : 0f, 0.22f);
+            float nextNoMods = Lerp(btnNoModsHover, isHoverNoMods && !isUpdating ? 1f : 0f, 0.22f);
             float nextClose = Lerp(btnCloseHover, isHoverClose && !isUpdating ? 1f : 0f, 0.22f);
-            if (nextUpd != btnUpdateHover || nextSkip != btnSkipHover || nextClose != btnCloseHover)
+            if (nextUpd != btnUpdateHover || nextSkip != btnSkipHover || nextNoMods != btnNoModsHover || nextClose != btnCloseHover)
             {
                 btnUpdateHover = nextUpd;
                 btnSkipHover = nextSkip;
+                btnNoModsHover = nextNoMods;
                 btnCloseHover = nextClose;
                 dirty = true;
             }
@@ -1066,7 +1141,17 @@ namespace WotModLauncher
             if (!isUpdating)
             {
                 if (rectBtnUpdate.Contains(e.Location))
-                    StartUpdateProcess();
+                {
+                    if (updates.Count > 0)
+                        StartUpdateProcess();
+                    else
+                        this.Close();
+                }
+                else if (rectBtnNoMods.Contains(e.Location))
+                {
+                    LaunchWithoutMods = true;
+                    this.Close();
+                }
                 else if (rectBtnSkip.Contains(e.Location) || rectClose.Contains(e.Location))
                     this.Close();
             }
@@ -1084,6 +1169,7 @@ namespace WotModLauncher
 
             isHoverUpdate = rectBtnUpdate.Contains(e.Location);
             isHoverSkip = rectBtnSkip.Contains(e.Location);
+            isHoverNoMods = rectBtnNoMods.Contains(e.Location);
             isHoverClose = rectClose.Contains(e.Location);
 
             int newHoverCard = -1;
@@ -1097,7 +1183,7 @@ namespace WotModLauncher
             }
             hoveredCardIndex = newHoverCard;
 
-            Cursor = (!isUpdating && (isHoverUpdate || isHoverSkip || isHoverClose))
+            Cursor = (!isUpdating && (isHoverUpdate || isHoverSkip || isHoverNoMods || isHoverClose))
                 ? Cursors.Hand
                 : Cursors.Default;
         }
@@ -1111,7 +1197,7 @@ namespace WotModLauncher
         protected override void OnMouseLeave(EventArgs e)
         {
             base.OnMouseLeave(e);
-            isHoverUpdate = isHoverSkip = isHoverClose = false;
+            isHoverUpdate = isHoverSkip = isHoverNoMods = isHoverClose = false;
             hoveredCardIndex = -1;
         }
 
@@ -1125,9 +1211,12 @@ namespace WotModLauncher
             g.FillRectangle(brushHeader, rectHeader);
             g.DrawLine(penAccentTop, 0, 1, Width, 1);
 
-            g.DrawString("ДОСТУПНІ ОНОВЛЕННЯ МОДІВ", fontTitle, brushTextMain, 20f, 12f);
+            g.DrawString(updates.Count > 0 ? "ДОСТУПНІ ОНОВЛЕННЯ МОДІВ" : "МОДИ ОНОВЛЕНІ",
+                fontTitle, brushTextMain, 20f, 12f);
             g.DrawString(
-                string.Format("Знайдено нових оновлень: {0} • Клієнт WoT {1}", updates.Count, gameVer),
+                string.Format("{0} • Клієнт WoT {1}",
+                    updates.Count > 0 ? string.Format("Знайдено нових оновлень: {0}", updates.Count) : "Оновлень немає",
+                    gameVer),
                 fontSubtitle, brushGold, 21f, 40f);
 
             DrawCloseButton(g);
@@ -1158,6 +1247,14 @@ namespace WotModLauncher
         {
             GraphicsState state = g.Save();
             g.SetClip(rectListViewport);
+
+            if (updates.Count == 0)
+            {
+                StringFormat emptySf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                g.DrawString("Усі моди оновлені. Можна запускати гру.", fontChanges, brushTextMuted, rectListViewport, emptySf);
+                g.Restore(state);
+                return;
+            }
 
             for (int i = 0; i < updates.Count; i++)
             {
@@ -1242,14 +1339,25 @@ namespace WotModLauncher
                 FillRoundedRect(g, brUpd, rectBtnUpdate, 6);
 
             StringFormat centerSf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-            g.DrawString(isUpdating ? "Оновлюємо моди..." : "Оновити і грати", fontButton, brushTextMain, rectBtnUpdate, centerSf);
+            string updateLabel = isUpdating ? "Оновлюємо моди..." : (updates.Count > 0 ? "Оновити і грати" : "Грати");
+            g.DrawString(updateLabel, fontButton, brushTextMain, rectBtnUpdate, centerSf);
 
-            int skipBg = 32 + (int)(btnSkipHover * 18);
-            using (var brSkip = new SolidBrush(Color.FromArgb(skipBg, skipBg + 7, skipBg + 18)))
-                FillRoundedRect(g, brSkip, rectBtnSkip, 6);
-            using (var pSkip = new Pen(Color.FromArgb(60 + (int)(btnSkipHover * 60), 75 + (int)(btnSkipHover * 60), 100), 1f))
-                DrawRoundedRect(g, pSkip, rectBtnSkip, 6);
-            g.DrawString("Грати без оновлення", fontButton, brushTextMuted, rectBtnSkip, centerSf);
+            if (updates.Count > 0)
+            {
+                int skipBg = 32 + (int)(btnSkipHover * 18);
+                using (var brSkip = new SolidBrush(Color.FromArgb(skipBg, skipBg + 7, skipBg + 18)))
+                    FillRoundedRect(g, brSkip, rectBtnSkip, 6);
+                using (var pSkip = new Pen(Color.FromArgb(60 + (int)(btnSkipHover * 60), 75 + (int)(btnSkipHover * 60), 100), 1f))
+                    DrawRoundedRect(g, pSkip, rectBtnSkip, 6);
+                g.DrawString("Без оновлення", fontButton, brushTextMuted, rectBtnSkip, centerSf);
+            }
+
+            int noModsBg = 32 + (int)(btnNoModsHover * 18);
+            using (var brNoMods = new SolidBrush(Color.FromArgb(noModsBg, noModsBg + 7, noModsBg + 18)))
+                FillRoundedRect(g, brNoMods, rectBtnNoMods, 6);
+            using (var pNoMods = new Pen(Color.FromArgb(60 + (int)(btnNoModsHover * 60), 75 + (int)(btnNoModsHover * 60), 100), 1f))
+                DrawRoundedRect(g, pNoMods, rectBtnNoMods, 6);
+            g.DrawString("Без модів", fontButton, brushTextMuted, rectBtnNoMods, centerSf);
         }
 
         private static GraphicsPath CreateRoundPath(Rectangle r, int radius)
