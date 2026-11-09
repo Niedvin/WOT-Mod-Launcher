@@ -9,7 +9,7 @@ cert_thumb = 'AA591F513F66919CF86F337114D9A360991A24E7'
 sign_environment = dict(os.environ)
 sign_environment['PSModulePath'] = os.path.join(os.environ['SystemRoot'], 'System32/WindowsPowerShell/v1.0/Modules')
 
-subprocess.check_call(['python', 'scratch/stage_mods.py'])
+subprocess.check_call([sys.executable, 'scratch/stage_mods.py'])
 
 os.makedirs(r'staging_modpack\Launcher', exist_ok=True)
 subprocess.check_call([

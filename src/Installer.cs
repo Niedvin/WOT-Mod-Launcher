@@ -1661,7 +1661,7 @@ namespace WotModpackInstaller
                 {
                     try
                     {
-                        InstallLauncherAndShortcuts(gamePath, hijackShortcuts);
+                        InstallLauncherAndShortcuts(gamePath, hijackShortcuts, mods);
                     }
                     catch (Exception ex)
                     {
@@ -2038,7 +2038,7 @@ namespace WotModpackInstaller
             return null;
         }
 
-        private void InstallLauncherAndShortcuts(string gamePath, bool hijackStandard)
+        private void InstallLauncherAndShortcuts(string gamePath, bool hijackStandard, List<ModItem> selectedMods)
         {
             Log("Лаунчер: пошук WotModLauncher.exe...");
             string srcExe = LocateStagedLauncherExe();
@@ -2062,11 +2062,21 @@ namespace WotModpackInstaller
                 return;
             }
 
+            var selectedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (ModItem mod in selectedMods)
+                if (!string.IsNullOrEmpty(mod.id))
+                    selectedIds.Add(mod.id);
+            var skipMods = new List<string>();
+            foreach (ModItem mod in loadedMods)
+                if (!mod.required && !string.IsNullOrEmpty(mod.id) && !selectedIds.Contains(mod.id))
+                    skipMods.Add(mod.id);
+
             var ser = new JavaScriptSerializer();
             string cfgJson = ser.Serialize(new Dictionary<string, object>
             {
                 { "game_path", gamePath },
-                { "hijack_shortcuts", hijackStandard }
+                { "hijack_shortcuts", hijackStandard },
+                { "skip_mods", skipMods }
             });
             string cfgPath = Path.Combine(targetDir, "launcher.json");
             File.WriteAllText(cfgPath, cfgJson, System.Text.Encoding.UTF8);

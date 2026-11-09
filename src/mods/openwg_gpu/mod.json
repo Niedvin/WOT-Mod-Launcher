@@ -1,0 +1,70 @@
+{
+  "folder": "10_OpenWG_GPU",
+  "dir": "openwg_gpu",
+  "id": "openwg_gpu",
+  "title": "GPU Boost (Anti-Lag + XeSS)",
+  "version": "2.8.3.0000",
+  "author": "OpenWG Team",
+  "description": "OpenWG GPU: AMD Radeon Anti-Lag 2 для меншої затримки вводу та Intel XeSS для апскейлу. NVIDIA Reflex, DLSS, FSR та нейрорендеринг вимкнені у налаштуваннях за замовчуванням. Мод вбудовується в рендер клієнта (нативні DLL), тому використовуйте на власний ризик.",
+  "changes": "Додано OpenWG Common 2.8.3 з Anti-Lag 2 та апскейлером XeSS.",
+  "default_checked": false,
+  "clean_patterns": [
+    "net.openwg/net.openwg.common_*.wotmod",
+    "net.openwg/net.openwg.gpu.*.wotmod"
+  ],
+  "clean_res_mods": [],
+  "readme_features": [
+    "AMD Radeon Anti-Lag 2 (працює лише на відеокартах Radeon).",
+    "Intel XeSS Super Resolution (якість обирається у налаштуваннях гри).",
+    "NVIDIA Reflex, DLSS, FSR та нейрорендеринг вимкнені за замовчуванням.",
+    "Оновлення бібліотек перевіряється інсталятором на GitLab OpenWG."
+  ],
+  "build": {
+    "kind": "none"
+  },
+  "files": [
+    {
+      "source": "scratch/openwg_gpu_cfg/gpu.json",
+      "target": "game_files/mods/configs/net.openwg.wot.common/gpu.json"
+    },
+    {
+      "source": "scratch/openwg_gpu_cfg/upscaler.json",
+      "target": "game_files/mods/configs/net.openwg.gpu.upscaler/config.json"
+    }
+  ],
+  "remote": [
+    {
+      "source": "mods/{ver}/net.openwg/net.openwg.common_2.8.3.0000.wotmod",
+      "target": "game_files/mods/_VERSION_/net.openwg/net.openwg.common_2.8.3.0000.wotmod",
+      "id": "net.openwg.common"
+    },
+    {
+      "source": "mods/{ver}/net.openwg/net.openwg.gpu.upscaler_2.8.3.0000.wotmod",
+      "target": "game_files/mods/_VERSION_/net.openwg/net.openwg.gpu.upscaler_2.8.3.0000.wotmod",
+      "id": "net.openwg.gpu.upscaler"
+    },
+    {
+      "source": "mods/{ver}/net.openwg/net.openwg.gpu.upscaler.xess_2.8.3.0000.wotmod",
+      "target": "game_files/mods/_VERSION_/net.openwg/net.openwg.gpu.upscaler.xess_2.8.3.0000.wotmod",
+      "id": "net.openwg.gpu.upscaler.xess"
+    }
+  ],
+  "updates": [
+    {
+      "id": "net.openwg.common",
+      "kind": "openwg_zip",
+      "repo": "openwg/wot.common"
+    },
+    {
+      "id": "net.openwg.gpu.upscaler",
+      "kind": "openwg_zip",
+      "repo": "openwg/wot.common"
+    },
+    {
+      "id": "net.openwg.gpu.upscaler.xess",
+      "kind": "openwg_zip",
+      "repo": "openwg/wot.common"
+    }
+  ],
+  "obsolete": []
+}

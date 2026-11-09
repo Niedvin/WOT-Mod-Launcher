@@ -21,8 +21,8 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("Niedvin")]
 [assembly: AssemblyProduct("WoT Modpack by Niedvin")]
 [assembly: AssemblyCopyright("Copyright © 2026 Niedvin")]
-[assembly: AssemblyFileVersion("1.2.0.0")]
-[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.3.0.0")]
+[assembly: AssemblyVersion("1.3.0.0")]
 
 namespace WotModLauncher
 {
@@ -68,6 +68,7 @@ namespace WotModLauncher
         public string game_path { get; set; }
         public bool hijack_shortcuts { get; set; }
         public string manifest_url { get; set; }
+        public List<string> skip_mods { get; set; }
     }
 
     public class ManifestLauncherInfo
@@ -95,6 +96,7 @@ namespace WotModLauncher
         public string sha256 { get; set; }
         public long size { get; set; }
         public string changes { get; set; }
+        public bool? default_checked { get; set; }
     }
 
     public class ManifestRoot
@@ -111,6 +113,7 @@ namespace WotModLauncher
         public ManifestModEntry Remote { get; set; }
         public string LocalFilePath { get; set; }
         public string InstalledVersion { get; set; }
+        public bool IsNew { get; set; }
         public float HoverProgress;
     }
 
@@ -192,7 +195,7 @@ namespace WotModLauncher
             if (manifest != null)
             {
                 selfUpdatePlan = GetSelfUpdatePlan(manifest.launcher);
-                List<PendingModUpdate> updates = FindPendingUpdates(cfg.game_path, gameVer, manifest);
+                List<PendingModUpdate> updates = FindPendingUpdates(cfg.game_path, gameVer, manifest, cfg.skip_mods);
                 if (updates.Count > 0 && !checkOnly)
                 {
                     using (var form = new UpdateDialogForm(cfg.game_path, gameVer, updates))
@@ -651,46 +654,72 @@ namespace WotModLauncher
             try { if (File.Exists(path)) File.Delete(path); } catch { }
         }
 
-        public static List<PendingModUpdate> FindPendingUpdates(string gamePath, string gameVer, ManifestRoot manifest)
+        private static bool IsSkipped(List<string> skipMods, string id)
+        {
+            if (skipMods == null) return false;
+            foreach (string skipped in skipMods)
+                if (string.Equals(skipped, id, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            return false;
+        }
+
+        public static List<PendingModUpdate> FindPendingUpdates(string gamePath, string gameVer, ManifestRoot manifest, List<string> skipMods)
         {
             var result = new List<PendingModUpdate>();
             if (manifest == null || manifest.mods == null || string.IsNullOrEmpty(gameVer))
                 return result;
 
             string verRoot = Path.Combine(gamePath, "mods", gameVer);
-            if (!Directory.Exists(verRoot)) return result;
+            Directory.CreateDirectory(verRoot);
 
             foreach (ManifestModEntry entry in manifest.mods)
             {
-                if (entry == null || string.IsNullOrEmpty(entry.id) || string.IsNullOrEmpty(entry.version))
+                if (entry == null || string.IsNullOrEmpty(entry.id) || string.IsNullOrEmpty(entry.version) || string.IsNullOrEmpty(entry.file))
+                    continue;
+                if (IsSkipped(skipMods, entry.id))
                     continue;
 
                 string searchDir = string.IsNullOrEmpty(entry.subdir)
                     ? verRoot
                     : Path.Combine(verRoot, entry.subdir.Replace('/', Path.DirectorySeparatorChar));
 
-                if (!Directory.Exists(searchDir)) continue;
-
                 string rx = "^" + Regex.Escape(entry.id) + @"_([0-9]+(?:\.[0-9]+)*)\.wotmod$";
                 string foundFile = null;
                 Version foundVer = null;
 
-                foreach (string f in Directory.GetFiles(searchDir, entry.id + "_*.wotmod", SearchOption.TopDirectoryOnly))
+                if (Directory.Exists(searchDir))
                 {
-                    string name = Path.GetFileName(f);
-                    Match m = Regex.Match(name, rx, RegexOptions.IgnoreCase);
-                    if (m.Success)
+                    foreach (string f in Directory.GetFiles(searchDir, entry.id + "_*.wotmod", SearchOption.TopDirectoryOnly))
                     {
-                        Version v = ParseVer(m.Groups[1].Value);
-                        if (v != null && (foundVer == null || v > foundVer))
+                        string name = Path.GetFileName(f);
+                        Match m = Regex.Match(name, rx, RegexOptions.IgnoreCase);
+                        if (m.Success)
                         {
-                            foundVer = v;
-                            foundFile = f;
+                            Version v = ParseVer(m.Groups[1].Value);
+                            if (v != null && (foundVer == null || v > foundVer))
+                            {
+                                foundVer = v;
+                                foundFile = f;
+                            }
                         }
                     }
                 }
 
-                if (foundFile == null || foundVer == null) continue;
+                if (foundFile == null)
+                {
+                    // Without an explicit installer selection, only default-checked mods are auto-added
+                    if (skipMods == null && entry.default_checked == false)
+                        continue;
+                    // Mods present on GitHub but missing locally are installed on the next launch
+                    result.Add(new PendingModUpdate
+                    {
+                        Remote = entry,
+                        LocalFilePath = Path.Combine(searchDir, entry.file),
+                        InstalledVersion = null,
+                        IsNew = true
+                    });
+                    continue;
+                }
 
                 Version remoteVer = ParseVer(entry.version);
                 if (remoteVer != null && remoteVer > foundVer)
@@ -1153,7 +1182,9 @@ namespace WotModLauncher
 
                 g.DrawString(item.Remote.title ?? item.Remote.id, fontModTitle, brushTextMain, cardRect.X + 14, cardRect.Y + 10);
 
-                string badgeText = string.Format("v{0} → v{1}", item.InstalledVersion, item.Remote.version);
+                string badgeText = item.IsNew
+                    ? string.Format("новий • v{0}", item.Remote.version)
+                    : string.Format("v{0} → v{1}", item.InstalledVersion, item.Remote.version);
                 SizeF badgeSize = g.MeasureString(badgeText, fontBadge);
                 int badgeW = (int)badgeSize.Width + 14;
                 Rectangle badgeRect = new Rectangle(cardRect.Right - badgeW - 14, cardRect.Y + 10, badgeW, 22);
@@ -1297,12 +1328,23 @@ namespace WotModLauncher
                         throw new InvalidDataException("Пакет .wotmod пошкоджений або має інший ID: " + rem.file);
                     }
 
+                    string destDir = Path.GetDirectoryName(u.LocalFilePath);
+                    Directory.CreateDirectory(destDir);
+
+                    if (u.IsNew)
+                    {
+                        string newFile = Path.Combine(destDir, rem.file);
+                        if (File.Exists(newFile)) File.Delete(newFile);
+                        File.Move(tmpFile, newFile);
+                        replacedPairs.Add(new string[] { null, newFile, newFile });
+                        continue;
+                    }
+
                     string relOld = u.LocalFilePath.Substring(gamePath.Length).TrimStart('\\', '/');
                     string bkpFile = Path.Combine(bkpDir, relOld);
                     Directory.CreateDirectory(Path.GetDirectoryName(bkpFile));
                     File.Copy(u.LocalFilePath, bkpFile, true);
 
-                    string destDir = Path.GetDirectoryName(u.LocalFilePath);
                     string newDestPath = Path.Combine(destDir, rem.file);
 
                     File.Delete(u.LocalFilePath);
@@ -1324,7 +1366,7 @@ namespace WotModLauncher
                     try
                     {
                         if (File.Exists(pair[2])) File.Delete(pair[2]);
-                        if (File.Exists(pair[0])) File.Copy(pair[0], pair[1], true);
+                        if (pair[0] != null && File.Exists(pair[0])) File.Copy(pair[0], pair[1], true);
                     }
                     catch { }
                 }

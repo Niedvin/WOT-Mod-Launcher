@@ -1,0 +1,52 @@
+{
+  "folder": "01_Server_Online_Autoconnect",
+  "dir": "server_online",
+  "id": "server_online",
+  "title": "Smart Server",
+  "version": "1.1.2",
+  "author": "Niedvin",
+  "description": "Автоматичний вибір сервера з максимальним онлайном, розширене меню вибору сервера з числовим онлайном без обрізання та авто-релоґін після бою при дисбалансі онлайну (>=1.5x).",
+  "changes": "Нова назва: Smart Server. Вибір сервера за онлайном та авто-релоґін без змін.",
+  "default_checked": true,
+  "clean_patterns": [
+    "ua.server_online_autoconnect*.wotmod"
+  ],
+  "clean_res_mods": [],
+  "readme_features": [
+    "Автоматичне підключення до сервера з найбільшим активним онлайном.",
+    "Кількість гравців у списку серверів без обрізання тексту: EU1 (17 070).",
+    "Автоматичний перехід на інший сервер після бою при перекосі онлайну (>= 1.5x)."
+  ],
+  "build": {
+    "kind": "pyc",
+    "source": "mods/configs/server_online/mod_server_online_autoconnect.py",
+    "entry": "res/scripts/client/gui/mods/mod_server_online_autoconnect.pyc",
+    "base": "mods/{ver}/ua.server_online_autoconnect_1.1.2.wotmod",
+    "output": "build/mods/{ver}/ua.server_online_autoconnect_1.1.2.wotmod",
+    "name": "Smart Server",
+    "description": "Automatically connects to highest population server, expands dropdown width, formats server names, and auto-reconnects post-battle when population is 1.5x higher.",
+    "extra": []
+  },
+  "files": [
+    {
+      "source": "build/mods/{ver}/ua.server_online_autoconnect_1.1.2.wotmod",
+      "target": "game_files/mods/_VERSION_/ua.server_online_autoconnect_1.1.2.wotmod"
+    },
+    {
+      "source": "mods/configs/server_online/config.json",
+      "target": "game_files/mods/configs/server_online/config.json"
+    },
+    {
+      "source": "mods/configs/server_online/cache.json",
+      "target": "game_files/mods/configs/server_online/cache.json"
+    },
+    {
+      "source": "mods/configs/server_online/mod_server_online_autoconnect.py",
+      "target": "game_files/mods/configs/server_online/mod_server_online_autoconnect.py"
+    }
+  ],
+  "obsolete": [
+    "ua.server_online_autoconnect_1.1.0.wotmod",
+    "ua.server_online_autoconnect_1.1.1.wotmod"
+  ]
+}

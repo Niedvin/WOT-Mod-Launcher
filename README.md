@@ -8,7 +8,7 @@
 Лаунчер `WotModLauncher.exe` (встановлюється інсталятором модпаку у `%LOCALAPPDATA%\WotModpack`) при кожному запуску гри:
 
 1. завантажує [manifest.json останнього релізу](https://github.com/Niedvin/WOT-Mod-Launcher/releases/latest/download/manifest.json) (таймаут 4 с);
-2. звіряє версії встановлених `.wotmod` з маніфестом (ідентифікатор і версія з `meta.xml` / назви файлу);
+2. звіряє версії встановлених `.wotmod` з маніфестом (ідентифікатор і версія з `meta.xml` / назви файлу), доставляє відсутні моди з маніфесту та пропускає ID зі списку `skip_mods` у `launcher.json`;
 3. якщо оновлень немає або немає інтернету — одразу запускає `WorldOfTanks.exe`, без зайвих вікон;
 4. якщо оновлення є — показує вікно зі списком змін та кнопками «Оновити і грати» / «Грати без оновлення»;
 5. кожен пакет перевіряється за SHA-256, розміром і `meta.xml` (`<id>`); перед заміною створюється бекап у `<гра>\.backups\launcher\`, при збої старі файли відновлюються;
@@ -81,3 +81,9 @@
 ## Development
 
 Source for all 7 Niedvin mods, native focus helper, build scripts and research artwork is included under `src/mods/` and `src/build/`. See [build instructions](docs/BUILD.md) and [research design validation](docs/research-button-design-qa.md).
+
+## Додавання нового мода
+
+Кожен мод описується одним `src/mods/<id>/mod.json`: id, тека в інсталяторі, назва, версія, опис, файли для staging, список старих версій і спосіб збірки (`pyc`, `script`, `prebuilt` або `none`). `build_mods.py`, `stage_mods.py`, інсталятор і `manifest.json` читають ці файли автоматично — окремі списки модів редагувати не треба.
+
+Щоб додати мод: створіть `src/mods/<id>/mod.json`, покладіть джерела або вкажіть готовий `.wotmod`, виконайте `python scratch/build_mods.py` і `python scratch/stage_mods.py`, потім зробіть реліз. Новий мод з'явиться у списку інсталятора та в оновленнях лаунчера.

@@ -1,187 +1,174 @@
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import zipfile
+
+import mods_registry
 
 py27 = 'py27_dist/python.exe'
 if b'worldoftanks.exe' in subprocess.check_output(['tasklist', '/FI', 'IMAGENAME eq WorldOfTanks.exe', '/FO', 'CSV', '/NH']).lower():
     raise RuntimeError('Live installation waits for game exit')
 
-def get_game_version():
+repo = mods_registry.find_repo(os.path.dirname(os.path.abspath(__file__)))
+if repo is None:
+    raise SystemExit('Repository with src/mods not found')
+mods = mods_registry.load_mods(repo)
+run_tests = '--run-tests' in sys.argv
+
+
+def game_version():
     if os.path.exists('version.xml'):
-        with open('version.xml', 'r') as f:
-            m = re.search(r'v\.(\d+\.\d+\.\d+\.\d+)', f.read())
-            if m:
-                return m.group(1)
+        with open('version.xml', 'r') as handle:
+            match = re.search(r'v\.(\d+\.\d+\.\d+\.\d+)', handle.read())
+            if match:
+                return match.group(1)
     return '2.4.1.0'
 
-ver = get_game_version()
 
-# Background FPS Limiter and Spectator+ are compiled and packaged by their own build.py below
-py_targets = [
-    'mods/configs/server_online/mod_server_online_autoconnect.py',
-    'mods/configs/platoon_autostart/mod_platoon_autostart.py',
-    'mods/configs/armor_flashlight/mod_armor_flashlight_brightness.py'
-]
-
-for pf in py_targets:
-    subprocess.check_call([py27, '-m', 'py_compile', pf])
-print('Compiled all Python 2.7 scripts.')
-
-def create_or_update_wotmod(src_wotmod, dst_wotmod, update_map):
-    temp_path = dst_wotmod + '.tmp'
-    os.makedirs(os.path.dirname(dst_wotmod), exist_ok=True)
-    written = set()
-    with zipfile.ZipFile(temp_path, 'w', compression=zipfile.ZIP_STORED) as zout:
-        if os.path.exists(src_wotmod):
-            with zipfile.ZipFile(src_wotmod, 'r') as zin:
-                for item in zin.infolist():
-                    # Members that are replaced anyway are not read from the old package
-                    data = update_map[item.filename] if item.filename in update_map else zin.read(item.filename)
-                    zinfo = zipfile.ZipInfo(item.filename)
-                    zinfo.compress_type = zipfile.ZIP_STORED
-                    zinfo.date_time = item.date_time
-                    zinfo.external_attr = item.external_attr
-                    zout.writestr(zinfo, data)
-                    written.add(item.filename)
-        for fname, data in update_map.items():
-            if fname not in written:
-                zinfo = zipfile.ZipInfo(fname)
-                zinfo.compress_type = zipfile.ZIP_STORED
-                zout.writestr(zinfo, data)
-    os.replace(temp_path, dst_wotmod)
-
-build_dir = f'build/mods/{ver}'
+ver = game_version()
+build_dir = 'build/mods/%s' % ver
 os.makedirs(build_dir, exist_ok=True)
 
-def find_src_or_base(primary_name, fallback_name):
-    for p in [f'{build_dir}/{primary_name}', f'mods/{ver}/{primary_name}', f'{build_dir}/{fallback_name}', f'mods/{ver}/{fallback_name}']:
-        if os.path.exists(p):
-            return p
-    return f'mods/{ver}/{fallback_name}'
 
-src_srv = find_src_or_base('ua.server_online_autoconnect_1.1.2.wotmod', 'ua.server_online_autoconnect_1.1.1.wotmod')
-dst_srv = f'{build_dir}/ua.server_online_autoconnect_1.1.2.wotmod'
-with open('mods/configs/server_online/mod_server_online_autoconnect.pyc', 'rb') as f:
-    srv_pyc = f.read()
-srv_meta = """<root>
-    <id>ua.server_online_autoconnect</id>
-    <version>1.1.2</version>
-    <name>Smart Server</name>
-    <description>Automatically connects to highest population server, expands dropdown width, formats server names, and auto-reconnects post-battle when population is 1.5x higher.</description>
-</root>"""
-create_or_update_wotmod(src_srv, dst_srv, {
-    'meta.xml': srv_meta,
-    'res/scripts/client/gui/mods/mod_server_online_autoconnect.pyc': srv_pyc
-})
+def expand(value):
+    return mods_registry.expand(value, ver)
 
-src_plt = find_src_or_base('ua.platoon_autostart_1.0.3.wotmod', 'ua.platoon_autostart_1.0.2.wotmod')
-dst_plt = f'{build_dir}/ua.platoon_autostart_1.0.3.wotmod'
-with open('mods/configs/platoon_autostart/mod_platoon_autostart.pyc', 'rb') as f:
-    plt_pyc = f.read()
-plt_meta = """<root>
-    <id>ua.platoon_autostart</id>
-    <version>1.0.3</version>
-    <name>Squad+</name>
-    <description>Auto-starts battle when platoon is ready, duplicates Battle button in platoon window, and fixes ready cooldown delay.</description>
-</root>"""
-plt_map = {
-    'meta.xml': plt_meta,
-    'res/scripts/client/gui/mods/mod_platoon_autostart.pyc': plt_pyc
-}
-if os.path.exists('scratch/platoon_ui_edit/MembersWindow.js'):
-    with open('scratch/platoon_ui_edit/MembersWindow.js', 'rb') as f:
-        plt_map['res/gui/gameface/_dist/production/lobby/platoon/MembersWindow/MembersWindow.js'] = f.read()
-if os.path.exists('scratch/platoon_ui_edit/MembersWindow.css'):
-    with open('scratch/platoon_ui_edit/MembersWindow.css', 'rb') as f:
-        plt_map['res/gui/gameface/_dist/production/lobby/platoon/MembersWindow/MembersWindow.css'] = f.read()
-create_or_update_wotmod(src_plt, dst_plt, plt_map)
 
-src_arm = find_src_or_base('ua.armor_flashlight_brightness_1.0.2.wotmod', 'ua.armor_flashlight_brightness_1.0.1.wotmod')
-dst_arm = f'{build_dir}/ua.armor_flashlight_brightness_1.0.2.wotmod'
-with open('mods/configs/armor_flashlight/mod_armor_flashlight_brightness.pyc', 'rb') as f:
-    arm_pyc = f.read()
-arm_meta = """<root>
-    <id>ua.armor_flashlight_brightness</id>
-    <version>1.0.2</version>
-    <name>Velet Penetration</name>
-    <description>Boosts penetration indicator brightness localized on aimed armor.</description>
-</root>"""
-create_or_update_wotmod(src_arm, dst_arm, {
-    'meta.xml': arm_meta,
-    'res/scripts/client/gui/mods/mod_armor_flashlight_brightness.pyc': arm_pyc
-})
+def path_for(value):
+    value = value.replace('{ver}', ver)
+    if value.startswith('src/'):
+        return os.path.join(repo, value)
+    return value
 
-# These builders write the packages below themselves (FPS also embeds the native focus helper)
-dst_fps = f'{build_dir}/ua.background_fps_limiter_1.0.4.wotmod'
-dst_hud = f'{build_dir}/ua.spectator_teammate_hud_1.0.11.wotmod'
-subprocess.check_call([sys.executable, 'scratch/background_fps/build.py'])
-subprocess.check_call([sys.executable, 'scratch/research_btn/build.py', '--install'])
-subprocess.check_call([sys.executable, 'scratch/spectator_hud/build.py', '--no-staging'])
 
-locker_args = [sys.executable, 'scratch/appropriate_locker/build.py']
-if '--run-tests' in sys.argv:
-    locker_args.append('--run-tests')
-subprocess.check_call(locker_args)
-dst_locker = f'{build_dir}/ua.appropriate_locker_1.2.2.wotmod'
-shutil.copy2('scratch/appropriate_locker/ua.appropriate_locker_1.2.2.wotmod', dst_locker)
+def meta_xml(mod, cfg):
+    return (
+        '<root>\n'
+        '    <id>%s</id>\n'
+        '    <version>%s</version>\n'
+        '    <name>%s</name>\n'
+        '    <description>%s</description>\n'
+        '</root>'
+    ) % (mod['id'], mod['version'], cfg.get('name', mod['title']), cfg.get('description', mod.get('description', '')))
 
-for mod_file in [dst_srv, dst_plt, dst_arm, dst_fps, dst_hud, dst_locker]:
-    live_target = os.path.join(f'mods/{ver}', os.path.basename(mod_file))
-    try:
-        shutil.copy2(mod_file, live_target)
-    except OSError:
-        pass
 
-old_mods = [
-    'ua.server_online_autoconnect_1.1.0.wotmod',
-    'ua.platoon_autostart_1.0.0.wotmod',
-    'ua.platoon_autostart_1.0.1.wotmod',
-    'ua.armor_flashlight_brightness_1.0.0.wotmod',
-    'ua.background_fps_limiter_1.0.0.wotmod',
-    'ua.spectator_teammate_hud_1.0.0.wotmod',
-    'ua.spectator_teammate_hud_1.0.1.wotmod',
-    'ua.spectator_teammate_hud_1.0.2.wotmod',
-    'ua.spectator_teammate_hud_1.0.3.wotmod',
-    'ua.spectator_teammate_hud_1.0.4.wotmod',
-    'ua.spectator_teammate_hud_1.0.5.wotmod',
-    'ua.spectator_teammate_hud_1.0.6.wotmod',
-    'ua.spectator_teammate_hud_1.0.7.wotmod',
-    'ua.background_fps_limiter_1.0.1.wotmod',
-    'ua.background_fps_limiter_1.0.2.wotmod',
-    'ua.background_fps_limiter_1.0.3.wotmod',
-    'ua.server_online_autoconnect_1.1.1.wotmod',
-    'ua.platoon_autostart_1.0.2.wotmod',
-    'ua.armor_flashlight_brightness_1.0.1.wotmod',
-    'ua.spectator_teammate_hud_1.0.8.wotmod',
-    'ua.spectator_teammate_hud_1.0.9.wotmod',
-    'ua.spectator_teammate_hud_1.0.10.wotmod',
-    'ua.research_button_1.2.0.wotmod',
-    'ua.research_button_1.2.1.wotmod',
-    'ua.research_button_1.2.2.wotmod',
-    'ua.research_button_1.2.3.wotmod',
-    'ua.appropriate_locker_1.2.1.wotmod'
-]
-for om in old_mods:
-    for base in [build_dir, f'mods/{ver}']:
-        target = os.path.join(base, om)
-        if os.path.exists(target):
-            try:
-                os.remove(target)
-                print('Removed obsolete wotmod:', target)
-            except OSError:
-                pass
+def create_or_update_wotmod(src_wotmod, dst_wotmod, update_map):
+    temporary = dst_wotmod + '.tmp'
+    os.makedirs(os.path.dirname(dst_wotmod), exist_ok=True)
+    written = set()
+    with zipfile.ZipFile(temporary, 'w', compression=zipfile.ZIP_STORED) as output:
+        if os.path.exists(src_wotmod):
+            with zipfile.ZipFile(src_wotmod, 'r') as source:
+                for item in source.infolist():
+                    data = update_map[item.filename] if item.filename in update_map else source.read(item.filename)
+                    entry = zipfile.ZipInfo(item.filename)
+                    entry.compress_type = zipfile.ZIP_STORED
+                    entry.date_time = item.date_time
+                    entry.external_attr = item.external_attr
+                    output.writestr(entry, data)
+                    written.add(item.filename)
+        for name, data in update_map.items():
+            if name not in written:
+                entry = zipfile.ZipInfo(name)
+                entry.compress_type = zipfile.ZIP_STORED
+                output.writestr(entry, data)
+    os.replace(temporary, dst_wotmod)
 
-all_wotmods = [dst_srv, dst_plt, dst_arm, dst_fps, dst_hud, dst_locker]
-for wm in all_wotmods:
-    with zipfile.ZipFile(wm, 'r') as z:
-        for item in z.infolist():
-            assert item.compress_type == zipfile.ZIP_STORED, f'{wm}: {item.filename} not ZIP_STORED'
+
+def run_command(argv):
+    resolved = []
+    for index, argument in enumerate(argv):
+        argument = argument.replace('{ver}', ver)
+        if index == 0 and argument == 'python':
+            resolved.append(sys.executable)
+        elif index == 0 and argument == 'py27':
+            resolved.append(py27)
+        elif argument.startswith('src/'):
+            resolved.append(os.path.join(repo, argument))
+        else:
+            resolved.append(argument)
+    subprocess.check_call(resolved)
+
+
+def build_pyc(mod):
+    cfg = mod['build']
+    source = path_for(cfg['source'])
+    subprocess.check_call([py27, '-m', 'py_compile', source])
+    compiled = os.path.splitext(source)[0] + '.pyc'
+    update = {'meta.xml': meta_xml(mod, cfg), cfg['entry']: open(compiled, 'rb').read()}
+    for extra in cfg.get('extra', []):
+        extra_source = path_for(extra['source'])
+        if os.path.exists(extra_source):
+            update[extra['entry']] = open(extra_source, 'rb').read()
+    output = path_for(cfg['output'])
+    create_or_update_wotmod(path_for(cfg['base']), output, update)
+    return [output]
+
+
+def build_script(mod):
+    cfg = mod['build']
+    commands = expand(cfg.get('commands', []))
+    if run_tests and cfg.get('test_args') and commands:
+        commands[0] = commands[0] + cfg['test_args']
+    for command in commands:
+        run_command(command)
+    outputs = []
+    for item in expand(cfg.get('outputs', [])):
+        target = path_for(item['to'])
+        if item.get('from'):
+            source = path_for(item['from'])
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.copy2(source, target)
+        if not os.path.exists(target):
+            raise SystemExit('Build output missing for %s: %s' % (mod['id'], target))
+        if target.endswith('.wotmod'):
+            outputs.append(target)
+    if run_tests:
+        for command in expand(cfg.get('test_commands', [])):
+            run_command(command)
+    return outputs
+
+
+outputs = []
+for mod in mods:
+    kind = mod.get('build', {}).get('kind', 'none')
+    built = []
+    if kind == 'pyc':
+        built = build_pyc(mod)
+    elif kind == 'script':
+        built = build_script(mod)
+    elif kind == 'prebuilt':
+        built = [path_for(item['source']) for item in mod.get('files', []) if item['source'].endswith('.wotmod')]
+    elif kind != 'none':
+        raise SystemExit('Unknown build kind %s for %s' % (kind, mod['id']))
+    outputs.extend(built)
+    for item in mod.get('obsolete', []):
+        for base in (build_dir, os.path.join('mods', ver)):
+            target = os.path.join(base, item)
+            if os.path.exists(target):
+                try:
+                    os.remove(target)
+                    print('Removed obsolete wotmod:', target)
+                except OSError:
+                    pass
+    print('Built: %s' % mod['id'])
+
+for output in outputs:
+    if not os.path.exists(output):
+        raise SystemExit('Missing package: %s' % output)
+    live_target = os.path.join('mods', ver, os.path.basename(output))
+    if os.path.abspath(output) != os.path.abspath(live_target):
+        try:
+            shutil.copy2(output, live_target)
+        except OSError:
+            pass
+
+for output in outputs:
+    with zipfile.ZipFile(output, 'r') as archive:
+        for item in archive.infolist():
+            assert item.compress_type == zipfile.ZIP_STORED, '%s: %s not ZIP_STORED' % (output, item.filename)
 print('Verified: all wotmod packages have compress_type == 0.')
-
-if '--run-tests' in sys.argv:
-    subprocess.check_call([py27, 'scratch/test_hangar_detection.py'])
-    subprocess.check_call([py27, 'scratch/spectator_hud/test_mod_integration.py'])
 print('MOD BUILD FINISHED: sources compiled, wotmods packaged, live mods folder updated.')

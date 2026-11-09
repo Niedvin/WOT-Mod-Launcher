@@ -1,0 +1,47 @@
+{
+  "folder": "03_Armor_Flashlight_Brightness",
+  "dir": "armor_flashlight",
+  "id": "armor_flashlight",
+  "title": "Velet Penetration",
+  "version": "1.0.2",
+  "author": "Niedvin",
+  "description": "Налаштування яскравості та радіуса підсвічування коліматора/ліхтарика зон пробиття броні (зелений 1.5x, жовтий 1.1x, збільшений радіус 1.5x).",
+  "changes": "Нова назва: Velet Penetration. Функціонал без змін.",
+  "default_checked": false,
+  "clean_patterns": [
+    "ua.armor_flashlight_brightness*.wotmod"
+  ],
+  "clean_res_mods": [],
+  "readme_features": [
+    "Покращене кольорове підсвічування ліхтарика/коліматора бронепробиття.",
+    "Налаштування яскравості та збільшений радіус підсвітки зон пробиття (1.5x)."
+  ],
+  "build": {
+    "kind": "pyc",
+    "source": "mods/configs/armor_flashlight/mod_armor_flashlight_brightness.py",
+    "entry": "res/scripts/client/gui/mods/mod_armor_flashlight_brightness.pyc",
+    "base": "mods/{ver}/ua.armor_flashlight_brightness_1.0.2.wotmod",
+    "output": "build/mods/{ver}/ua.armor_flashlight_brightness_1.0.2.wotmod",
+    "name": "Velet Penetration",
+    "description": "Boosts penetration indicator brightness localized on aimed armor.",
+    "extra": []
+  },
+  "files": [
+    {
+      "source": "build/mods/{ver}/ua.armor_flashlight_brightness_1.0.2.wotmod",
+      "target": "game_files/mods/_VERSION_/ua.armor_flashlight_brightness_1.0.2.wotmod"
+    },
+    {
+      "source": "mods/configs/armor_flashlight/config.json",
+      "target": "game_files/mods/configs/armor_flashlight/config.json"
+    },
+    {
+      "source": "mods/configs/armor_flashlight/mod_armor_flashlight_brightness.py",
+      "target": "game_files/mods/configs/armor_flashlight/mod_armor_flashlight_brightness.py"
+    }
+  ],
+  "obsolete": [
+    "ua.armor_flashlight_brightness_1.0.0.wotmod",
+    "ua.armor_flashlight_brightness_1.0.1.wotmod"
+  ]
+}

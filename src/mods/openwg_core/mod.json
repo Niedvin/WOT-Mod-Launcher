@@ -1,0 +1,55 @@
+{
+  "folder": "06_OpenWG_Core",
+  "dir": "openwg_core",
+  "id": "openwg",
+  "required": true,
+  "title": "OpenWG Core & Fixes",
+  "version": "1.9.0",
+  "author": "OpenWG Team",
+  "description": "Набір бібліотек OpenWG: виправлення відображення післябойових результатів, реплеїв та підтримка GameFace інтерфейсу.",
+  "changes": "Оновлення виправлень післябойових результатів, реплеїв та GameFace.",
+  "default_checked": true,
+  "clean_patterns": [
+    "net.openwg/net.openwg.fix.*.wotmod",
+    "net.openwg/net.openwg.gameface_*.wotmod"
+  ],
+  "clean_res_mods": [],
+  "readme_features": [
+    "Пакет бібліотек OpenWG: виправлення кешу післябойових результатів, реплеїв та підтримка GameFace."
+  ],
+  "build": {
+    "kind": "prebuilt"
+  },
+  "files": [
+    {
+      "source": "mods/{ver}/net.openwg/net.openwg.fix.battleresultscache_1.9.0.wotmod",
+      "target": "game_files/mods/_VERSION_/net.openwg/net.openwg.fix.battleresultscache_1.9.0.wotmod"
+    },
+    {
+      "source": "mods/{ver}/net.openwg/net.openwg.fix.battleresultsreplays_1.1.0.wotmod",
+      "target": "game_files/mods/_VERSION_/net.openwg/net.openwg.fix.battleresultsreplays_1.1.0.wotmod"
+    },
+    {
+      "source": "mods/{ver}/net.openwg/net.openwg.gameface_1.2.2.wotmod",
+      "target": "game_files/mods/_VERSION_/net.openwg/net.openwg.gameface_1.2.2.wotmod"
+    }
+  ],
+  "updates": [
+    {
+      "id": "net.openwg.gameface",
+      "kind": "gitlab",
+      "repo": "openwg/wot.gameface"
+    },
+    {
+      "id": "net.openwg.fix.battleresultscache",
+      "kind": "gitlab",
+      "repo": "openwg/fixedbattleresultscache"
+    },
+    {
+      "id": "net.openwg.fix.battleresultsreplays",
+      "kind": "gitlab",
+      "repo": "openwg/wot.fix.battleresultsreplays"
+    }
+  ],
+  "obsolete": []
+}

@@ -1,0 +1,36 @@
+{
+  "folder": "04_ModsSettingsAPI",
+  "dir": "modssettingsapi",
+  "id": "modssettingsapi",
+  "required": true,
+  "title": "ModsSettings API",
+  "version": "1.7.1",
+  "author": "Izeberg",
+  "description": "Системний графічний інтерфейс для налаштування встановлених модифікацій прямо в меню гри.",
+  "changes": "Оновлення сумісності системного інтерфейсу налаштувань модів.",
+  "default_checked": true,
+  "clean_patterns": [
+    "*modssettingsapi*.wotmod"
+  ],
+  "clean_res_mods": [],
+  "readme_features": [
+    "Системний API графічного інтерфейсу для налаштування модів у меню гри."
+  ],
+  "build": {
+    "kind": "prebuilt"
+  },
+  "files": [
+    {
+      "source": "mods/{ver}/izeberg.modssettingsapi_1.7.1.wotmod",
+      "target": "game_files/mods/_VERSION_/izeberg.modssettingsapi_1.7.1.wotmod"
+    }
+  ],
+  "updates": [
+    {
+      "id": "izeberg.modssettingsapi",
+      "kind": "github",
+      "repo": "izeberg/modssettingsapi"
+    }
+  ],
+  "obsolete": []
+}

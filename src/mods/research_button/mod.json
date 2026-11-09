@@ -1,0 +1,70 @@
+{
+  "folder": "09_Research_Button",
+  "dir": "research_button",
+  "id": "research_button",
+  "title": "Quick Research",
+  "version": "1.2.4",
+  "author": "Niedvin",
+  "description": "Кнопка дослідження на середині лівого краю кожної плитки з танком; одразу відкриває дослідження цього танка.",
+  "changes": "Нова назва: Quick Research. Функціонал без змін.",
+  "default_checked": true,
+  "clean_patterns": [
+    "ua.research_button*.wotmod"
+  ],
+  "clean_res_mods": [
+    "gui/flash/TankCarousel.swf",
+    "gui/maps/icons/buttons/ua_research_btn.png",
+    "gui/gameface/_dist/production/mono/hangar/main/bundle.js"
+  ],
+  "readme_features": [
+    "Кнопка дослідження на кожній плитці каруселі танків.",
+    "Відкриває дерево дослідження саме того танка, на плитці якого натиснуто.",
+    "Research tree shortcut at the left edge center of occupied carousel cards."
+  ],
+  "build": {
+    "kind": "script",
+    "commands": [
+      [
+        "python",
+        "scratch/research_btn/build.py",
+        "--install"
+      ]
+    ],
+    "outputs": [
+      {
+        "to": "build/mods/{ver}/ua.research_button_1.2.4.wotmod"
+      },
+      {
+        "to": "build/res_mods/{ver}/gui/gameface/_dist/production/mono/hangar/main/bundle.js"
+      }
+    ]
+  },
+  "files": [
+    {
+      "source": "build/mods/{ver}/ua.research_button_1.2.4.wotmod",
+      "target": "game_files/mods/_VERSION_/ua.research_button_1.2.4.wotmod"
+    },
+    {
+      "source": "build/res_mods/{ver}/gui/gameface/_dist/production/mono/hangar/main/bundle.js",
+      "target": "game_files/res_mods/_VERSION_/gui/gameface/_dist/production/mono/hangar/main/bundle.js"
+    },
+    {
+      "source": "mods/configs/research_button/config.json",
+      "target": "game_files/mods/configs/research_button/config.json"
+    },
+    {
+      "source": "mods/configs/research_button/mod_research_button.py",
+      "target": "game_files/mods/configs/research_button/mod_research_button.py"
+    },
+    {
+      "source": "mods/configs/research_button/mod_research_button.pyc",
+      "target": "game_files/mods/configs/research_button/mod_research_button.pyc"
+    }
+  ],
+  "obsolete": [
+    "ua.research_button_1.2.0.wotmod",
+    "ua.research_button_1.2.1.wotmod",
+    "ua.research_button_1.2.2.wotmod",
+    "ua.research_button_1.2.3.wotmod"
+  ]
+}

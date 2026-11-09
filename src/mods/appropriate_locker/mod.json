@@ -1,0 +1,50 @@
+{
+  "folder": "11_Appropriate_Locker",
+  "dir": "appropriate_locker",
+  "id": "appropriate_locker",
+  "title": "Appropriate Locker",
+  "version": "1.2.2",
+  "author": "Niedvin",
+  "description": "Точне захоплення видимої поверхні цілі під прицілом замість центру танка; вмикається та вимикається клавішею Q. Мод не входить до офіційного клієнта та використовується на власний ризик.",
+  "changes": "Виправлено напівпрозорий квадрат у центрі екрана на старті бою до першого натискання Q.",
+  "default_checked": false,
+  "clean_patterns": [
+    "ua.appropriate_locker*.wotmod"
+  ],
+  "clean_res_mods": [],
+  "readme_features": [
+    "Точне захоплення поверхні цілі під прицілом у режимі \"ТОЧНИЙ ПРИЦІЛ\".",
+    "Перемикання режиму клавішею Q; на старті бою мод вимкнений.",
+    "Індикатор режиму в підказці бою з'являється лише після натискання Q."
+  ],
+  "build": {
+    "kind": "script",
+    "commands": [
+      [
+        "python",
+        "scratch/appropriate_locker/build.py"
+      ]
+    ],
+    "test_args": [
+      "--run-tests"
+    ],
+    "outputs": [
+      {
+        "from": "scratch/appropriate_locker/ua.appropriate_locker_1.2.2.wotmod",
+        "to": "build/mods/{ver}/ua.appropriate_locker_1.2.2.wotmod"
+      }
+    ]
+  },
+  "files": [
+    {
+      "source": "build/mods/{ver}/ua.appropriate_locker_1.2.2.wotmod",
+      "target": "game_files/mods/_VERSION_/ua.appropriate_locker_1.2.2.wotmod"
+    }
+  ],
+  "obsolete": [
+    "ua.appropriate_locker_1.0.0.wotmod",
+    "ua.appropriate_locker_1.1.0.wotmod",
+    "ua.appropriate_locker_1.2.0.wotmod",
+    "ua.appropriate_locker_1.2.1.wotmod"
+  ]
+}

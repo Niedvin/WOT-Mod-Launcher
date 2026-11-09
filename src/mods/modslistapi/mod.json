@@ -1,0 +1,36 @@
+{
+  "folder": "05_ModsListAPI",
+  "dir": "modslistapi",
+  "id": "modslistapi",
+  "required": true,
+  "title": "ModsList API",
+  "version": "1.8.0",
+  "author": "Poliroid",
+  "description": "Системний API для розміщення кнопки та списку модифікацій у нижньому правому кутку ангару.",
+  "changes": "Оновлення сумісності API списку модів в ангарі.",
+  "default_checked": true,
+  "clean_patterns": [
+    "*modslistapi*.wotmod"
+  ],
+  "clean_res_mods": [],
+  "readme_features": [
+    "Системний API для розміщення кнопки та списку модів в ангарі."
+  ],
+  "build": {
+    "kind": "prebuilt"
+  },
+  "files": [
+    {
+      "source": "mods/{ver}/me.poliroid.modslistapi_1.8.0.wotmod",
+      "target": "game_files/mods/_VERSION_/me.poliroid.modslistapi_1.8.0.wotmod"
+    }
+  ],
+  "updates": [
+    {
+      "id": "me.poliroid.modslistapi",
+      "kind": "gitlab",
+      "repo": "wot-public-mods/mods-list"
+    }
+  ],
+  "obsolete": []
+}

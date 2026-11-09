@@ -1,0 +1,66 @@
+{
+  "folder": "07_Spectator_Teammate_HUD",
+  "dir": "spectator_teammate_hud",
+  "id": "spectator_teammate_hud",
+  "title": "Spectator+",
+  "version": "1.0.11",
+  "author": "Niedvin",
+  "description": "Відображає приціл у реальному часі, таймер перезарядки, стан модулів і екіпажу, а також таймери перезарядки спорядження союзника, за яким ви спостерігаєте після знищення вашого танка.",
+  "changes": "Таймер перезарядки більше не смикається назад під час спостереження.",
+  "default_checked": true,
+  "clean_patterns": [
+    "ua.spectator_teammate_hud*.wotmod"
+  ],
+  "clean_res_mods": [],
+  "readme_features": [
+    "Відображення прицілу (коліматора й динамічного кола розкиду в 60 FPS) союзника при спостереженні після смерті.",
+    "Актуальний таймер перезарядки гармати з урахуванням часу, що вже минув.",
+    "Відображення пошкоджених та знищених модулів і екіпажу на панелі пошкоджень.",
+    "Відображення кругового кулдауну та числового зворотного відліку спорядження союзника.",
+    "Повна відсутність фонового навантаження на FPS під час живого бою."
+  ],
+  "build": {
+    "kind": "script",
+    "commands": [
+      [
+        "python",
+        "scratch/spectator_hud/build.py",
+        "--no-staging"
+      ]
+    ],
+    "test_commands": [
+      [
+        "py27",
+        "scratch/spectator_hud/test_mod_integration.py"
+      ]
+    ],
+    "outputs": [
+      {
+        "to": "build/mods/{ver}/ua.spectator_teammate_hud_1.0.11.wotmod"
+      }
+    ]
+  },
+  "files": [
+    {
+      "source": "build/mods/{ver}/ua.spectator_teammate_hud_1.0.11.wotmod",
+      "target": "game_files/mods/_VERSION_/ua.spectator_teammate_hud_1.0.11.wotmod"
+    },
+    {
+      "source": "mods/configs/spectator_teammate_hud/config.json",
+      "target": "game_files/mods/configs/spectator_teammate_hud/config.json"
+    }
+  ],
+  "obsolete": [
+    "ua.spectator_teammate_hud_1.0.0.wotmod",
+    "ua.spectator_teammate_hud_1.0.1.wotmod",
+    "ua.spectator_teammate_hud_1.0.2.wotmod",
+    "ua.spectator_teammate_hud_1.0.3.wotmod",
+    "ua.spectator_teammate_hud_1.0.4.wotmod",
+    "ua.spectator_teammate_hud_1.0.5.wotmod",
+    "ua.spectator_teammate_hud_1.0.6.wotmod",
+    "ua.spectator_teammate_hud_1.0.7.wotmod",
+    "ua.spectator_teammate_hud_1.0.8.wotmod",
+    "ua.spectator_teammate_hud_1.0.9.wotmod",
+    "ua.spectator_teammate_hud_1.0.10.wotmod"
+  ]
+}

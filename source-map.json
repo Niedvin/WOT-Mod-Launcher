@@ -11,6 +11,7 @@
     "src/publish_release.py": "scratch/publish_release.py",
     "src/build/build_mods.py": "scratch/build_mods.py",
     "src/build/build_installer.py": "scratch/build_installer.py",
+    "src/build/mods_registry.py": "scratch/mods_registry.py",
     "src/build/stage_mods.py": "scratch/stage_mods.py",
     "src/build/app.manifest": "scratch/app.manifest",
     "src/build/app.ico": "scratch/app.ico",

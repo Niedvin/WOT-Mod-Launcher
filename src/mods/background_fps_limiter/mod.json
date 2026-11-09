@@ -1,0 +1,60 @@
+{
+  "folder": "08_Background_FPS_Limiter",
+  "dir": "background_fps_limiter",
+  "id": "background_fps_limiter",
+  "title": "Background FPS Limiter",
+  "version": "1.0.4",
+  "author": "Niedvin",
+  "description": "Обмежує частоту кадрів (за замовчуванням 5 FPS), коли вікно гри не в фокусі (alt-tab або згортання), щоб зменшити навантаження на процесор і відеокарту; окремі перемикачі для ангару та бою.",
+  "changes": "Технічне оновлення пакета, функціонал без змін.",
+  "default_checked": true,
+  "clean_patterns": [
+    "ua.background_fps_limiter*.wotmod"
+  ],
+  "clean_res_mods": [],
+  "readme_features": [
+    "Обмежує частоту кадрів гри у фоновому режимі (за замовчуванням 5 FPS).",
+    "Окремі перемикачі для ангару та бою.",
+    "Працює і при згортанні вікна, і при переході в інше вікно (alt-tab).",
+    "Окремий повзунок FPS у фокусі, щоб гра не залипала на 60 кадрах.",
+    "Зменшує навантаження на процесор і відеокарту, коли гра неактивна."
+  ],
+  "build": {
+    "kind": "script",
+    "commands": [
+      [
+        "python",
+        "scratch/background_fps/build.py"
+      ]
+    ],
+    "outputs": [
+      {
+        "to": "build/mods/{ver}/ua.background_fps_limiter_1.0.4.wotmod"
+      }
+    ]
+  },
+  "files": [
+    {
+      "source": "build/mods/{ver}/ua.background_fps_limiter_1.0.4.wotmod",
+      "target": "game_files/mods/_VERSION_/ua.background_fps_limiter_1.0.4.wotmod"
+    },
+    {
+      "source": "mods/configs/background_fps_limiter/config.json",
+      "target": "game_files/mods/configs/background_fps_limiter/config.json"
+    },
+    {
+      "source": "mods/configs/background_fps_limiter/mod_background_fps_limiter.py",
+      "target": "game_files/mods/configs/background_fps_limiter/mod_background_fps_limiter.py"
+    },
+    {
+      "source": "mods/configs/background_fps_limiter/_ua_window_focus.pyd",
+      "target": "game_files/mods/configs/background_fps_limiter/_ua_window_focus.pyd"
+    }
+  ],
+  "obsolete": [
+    "ua.background_fps_limiter_1.0.0.wotmod",
+    "ua.background_fps_limiter_1.0.1.wotmod",
+    "ua.background_fps_limiter_1.0.2.wotmod",
+    "ua.background_fps_limiter_1.0.3.wotmod"
+  ]
+}

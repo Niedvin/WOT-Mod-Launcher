@@ -71,7 +71,8 @@ def iter_staged_wotmods():
         ver_dir = os.path.join(mod_dir, "game_files", "mods", "_VERSION_")
         if not os.path.isdir(ver_dir):
             continue
-        for root, _, files in os.walk(ver_dir):
+        for root, dirs, files in os.walk(ver_dir):
+            dirs.sort()
             for fname in sorted(files):
                 if not fname.endswith(".wotmod"):
                     continue
@@ -125,7 +126,8 @@ def local_test(game_ver, bump, out_dir):
             "url": os.path.abspath(os.path.join(out_dir, fname)),
             "sha256": sha256_file(full_path),
             "size": os.path.getsize(full_path),
-            "changes": info.get("changes") or info.get("description", "")
+            "changes": info.get("changes") or info.get("description", ""),
+            "default_checked": bool(info.get("default_checked", True))
         })
 
     for full_path, fname, rel_sub, info in iter_remote_payloads():
@@ -142,7 +144,8 @@ def local_test(game_ver, bump, out_dir):
             "url": os.path.abspath(os.path.join(out_dir, fname)),
             "sha256": sha256_file(full_path),
             "size": os.path.getsize(full_path),
-            "changes": info.get("changes") or info.get("description", "")
+            "changes": info.get("changes") or info.get("description", ""),
+            "default_checked": bool(info.get("default_checked", True))
         })
 
     manifest = {
@@ -215,7 +218,8 @@ def main():
             "url": f"{REPO_BASE_URL}/{fname}",
             "sha256": sha256_file(full_path),
             "size": os.path.getsize(full_path),
-            "changes": changes
+            "changes": changes,
+            "default_checked": bool(info.get("default_checked", True))
         })
 
     for full_path, fname, rel_sub, info in iter_remote_payloads():
@@ -230,7 +234,8 @@ def main():
             "url": f"{REPO_BASE_URL}/{fname}",
             "sha256": sha256_file(full_path),
             "size": os.path.getsize(full_path),
-            "changes": info.get("changes") or info.get("description", "")
+            "changes": info.get("changes") or info.get("description", ""),
+            "default_checked": bool(info.get("default_checked", True))
         })
 
     manifest = {
