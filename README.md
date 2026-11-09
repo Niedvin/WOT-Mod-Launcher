@@ -15,7 +15,7 @@
 6. після запуску гри лаунчер тихо, без вікон, завантажує власне оновлення у фоні та підміняє свій exe; наступний запуск іде вже з новою версією. Якщо підмінити файл не вдалося, новий exe застосовується під час наступного старту;
 7. переносить моди в нову папку версії гри після патчу клієнта.
 
-## Склад модпаку (реліз 2026.11.01, клієнт 2.4.1.1)
+## Склад модпаку (реліз 2026.11.06, клієнт 2.4.1.1)
 
 | Мод | Версія |
 |---|---|
@@ -29,6 +29,7 @@
 | Background FPS Limiter | 1.0.4 |
 | Quick Research | 1.2.4 |
 | GPU Boost: Anti-Lag 2 + XeSS (опційно, OpenWG 2.8.3) | 2.8.3.0000 |
+| Appropriate Locker | 1.2.2 |
 
 ## Завантаження
 
@@ -79,4 +80,4 @@
 
 ## Development
 
-Source for all 6 Niedvin mods, native focus helper, build scripts and research artwork is included under `src/mods/` and `src/build/`. See [build instructions](docs/BUILD.md) and [research design validation](docs/research-button-design-qa.md).
+Source for all 7 Niedvin mods, native focus helper, build scripts and research artwork is included under `src/mods/` and `src/build/`. See [build instructions](docs/BUILD.md) and [research design validation](docs/research-button-design-qa.md).

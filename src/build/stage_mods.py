@@ -291,6 +291,26 @@ mods_def = [
             {'id': 'net.openwg.gpu.upscaler', 'kind': 'openwg_zip', 'repo': 'openwg/wot.common'},
             {'id': 'net.openwg.gpu.upscaler.xess', 'kind': 'openwg_zip', 'repo': 'openwg/wot.common'}
         ]
+    },
+    {
+        'folder': '11_Appropriate_Locker',
+        'id': 'appropriate_locker',
+        'title': 'Appropriate Locker',
+        'version': '1.2.2',
+        'author': 'Niedvin',
+        'description': 'Точне захоплення видимої поверхні цілі під прицілом замість центру танка; вмикається та вимикається клавішею Q. Мод не входить до офіційного клієнта та використовується на власний ризик.',
+        'changes': 'Виправлено напівпрозорий квадрат у центрі екрана на старті бою до першого натискання Q.',
+        'default_checked': False,
+        'clean_patterns': ['ua.appropriate_locker*.wotmod'],
+        'clean_res_mods': [],
+        'readme_features': [
+            'Точне захоплення поверхні цілі під прицілом у режимі "ТОЧНИЙ ПРИЦІЛ".',
+            'Перемикання режиму клавішею Q; на старті бою мод вимкнений.',
+            'Індикатор режиму в підказці бою з\'являється лише після натискання Q.'
+        ],
+        'files': [
+            (get_src_wotmod('ua.appropriate_locker_1.2.2.wotmod'), 'game_files/mods/_VERSION_/ua.appropriate_locker_1.2.2.wotmod')
+        ]
     }
 ]
 

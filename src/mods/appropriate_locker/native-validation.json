@@ -1,0 +1,93 @@
+{
+  "Avatar_pyc_sha256": "adfc88eee97b634e5f75e04de54f2fa5373f6327a6da159d978cb682c71c72e6",
+  "VehicleGunRotator_pyc_sha256": "7068c3da8d99cafe724e7a62daf17a808e97567110b6a84b64fb6849d27215f5",
+  "live_game_verified": false,
+  "native_methods_executed": [
+    "__onTick",
+    "__trackPointOnServer",
+    "__updateShotPointOnServer",
+    "autoAim"
+  ],
+  "native_property_setters_present": [
+    "__set_shotPointSourceFunctor",
+    "__set_clientMode"
+  ],
+  "runs": [
+    {
+      "aim_offset_forwarded": true,
+      "disabled_mode_delegates_to_native": true,
+      "dynamic_part_resolved_to_parent": true,
+      "inactive_ctrl_lock_cleared": true,
+      "magnetic_delegated_when_unlocked": true,
+      "manual_aim_restored": true,
+      "nonzero_server_autoaim_calls": 0,
+      "out_of_aoi_native_lock_cleared": true,
+      "prediction": true,
+      "relative_tracking_point": [
+        17,
+        2,
+        45
+      ],
+      "sway_and_idle_dedup_verified": true,
+      "world_aim_point": [
+        20,
+        2,
+        49
+      ]
+    },
+    {
+      "aim_offset_forwarded": true,
+      "disabled_mode_delegates_to_native": true,
+      "dynamic_part_resolved_to_parent": true,
+      "inactive_ctrl_lock_cleared": true,
+      "magnetic_delegated_when_unlocked": true,
+      "manual_aim_restored": true,
+      "nonzero_server_autoaim_calls": 0,
+      "out_of_aoi_native_lock_cleared": true,
+      "prediction": false,
+      "relative_tracking_point": [
+        17,
+        2,
+        45
+      ],
+      "sway_and_idle_dedup_verified": true,
+      "world_aim_point": [
+        20,
+        2,
+        49
+      ]
+    }
+  ],
+  "verified_imports": [
+    "AimSound",
+    "AimSound.AimSound",
+    "Avatar",
+    "Avatar.PlayerAvatar",
+    "AvatarInputHandler",
+    "AvatarInputHandler.cameras",
+    "BattleReplay",
+    "BigWorld",
+    "Keys",
+    "Math",
+    "TriggersManager",
+    "TriggersManager.TRIGGER_TYPE",
+    "Vehicle",
+    "Vehicle.Vehicle",
+    "VehicleGunRotator",
+    "VehicleGunRotator.VehicleGunRotator",
+    "__future__",
+    "__future__.absolute_import",
+    "arena_bonus_type_caps",
+    "arena_bonus_type_caps.ARENA_BONUS_TYPE_CAPS",
+    "constants",
+    "constants.AIMING_MODE",
+    "gui.Scaleform.daapi.view.battle.shared.hint_panel.component",
+    "gui.Scaleform.daapi.view.battle.shared.hint_panel.component.BattleHintPanel",
+    "gui.Scaleform.daapi.view.battle.shared.hint_panel.hint_panel_plugin",
+    "gui.Scaleform.daapi.view.battle.shared.hint_panel.hint_panel_plugin.HintData",
+    "logging",
+    "math",
+    "random",
+    "weakref"
+  ]
+}

@@ -1,5 +1,11 @@
 {
   "files": {
+    "src/mods/appropriate_locker/mod_appropriate_locker.py": "scratch/appropriate_locker/mod_appropriate_locker.py",
+    "src/mods/appropriate_locker/build.py": "scratch/appropriate_locker/build.py",
+    "src/mods/appropriate_locker/check_native.py": "scratch/appropriate_locker/check_native.py",
+    "src/mods/appropriate_locker/test_appropriate_locker.py": "scratch/appropriate_locker/test_appropriate_locker.py",
+    "src/mods/appropriate_locker/README.md": "scratch/appropriate_locker/README.md",
+    "src/mods/appropriate_locker/native-validation.json": "scratch/appropriate_locker/native-validation.json",
     "src/WotModLauncher.cs": "scratch/WotModLauncher.cs",
     "src/Installer.cs": "scratch/Installer.cs",
     "src/publish_release.py": "scratch/publish_release.py",
