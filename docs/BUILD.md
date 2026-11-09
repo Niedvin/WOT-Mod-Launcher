@@ -24,6 +24,6 @@ The launcher normally opens the update panel before starting the game. `--update
 
 Bump `AssemblyFileVersion` and `AssemblyVersion` in `src/WotModLauncher.cs` for every launcher release. `manifest.json` takes the launcher version from the built exe, and installed clients only update to a strictly newer version.
 
-Release files are generated in `build/release_assets/`: 13 mod/framework packages, launcher, manifest, single-file installer and ZIP. Publish only after explicit user authorization and validate uploaded asset hashes. The installer is self-signed; its certificate is not trusted by Windows by default.
+Release files are generated in `build/release_assets/`: 15 mod/framework packages, launcher, manifest, single-file installer and ZIP. Publish only after explicit user authorization and validate uploaded asset hashes. The installer is self-signed; its certificate is not trusted by Windows by default.
 
 Spectator equipment placement is compiled and packaged, but still requires observation after death in a real battle. Component previews and package checks do not establish that behavior.
