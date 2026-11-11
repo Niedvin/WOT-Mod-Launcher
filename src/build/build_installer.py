@@ -15,7 +15,7 @@ os.makedirs(r'staging_modpack\Launcher', exist_ok=True)
 subprocess.check_call([
     csc_path, '/target:winexe', '/platform:anycpu', '/optimize+', '/codepage:65001', '/win32manifest:scratch\\app.manifest',
     '/win32icon:scratch\\app.ico',
-    '/r:System.Web.Extensions.dll', '/r:System.IO.Compression.dll',
+    '/r:System.Core.dll', '/r:System.Web.Extensions.dll', '/r:System.IO.Compression.dll',
     '/r:System.IO.Compression.FileSystem.dll', r'/out:staging_modpack\Launcher\WotModLauncher.exe',
     r'scratch\WotModLauncher.cs'
 ])
@@ -26,7 +26,7 @@ print('Compiled and signed staging_modpack/Launcher/WotModLauncher.exe.')
 subprocess.check_call([
     csc_path, '/target:winexe', '/platform:anycpu', '/optimize+', '/codepage:65001', '/win32manifest:scratch\\app.manifest',
     '/win32icon:scratch\\app.ico',
-    '/r:System.Web.Extensions.dll', '/r:System.IO.Compression.dll',
+    '/r:System.Core.dll', '/r:System.Web.Extensions.dll', '/r:System.IO.Compression.dll',
     '/r:System.IO.Compression.FileSystem.dll', r'/out:staging_modpack\Installer.exe',
     r'scratch\Installer.cs'
 ])
@@ -49,7 +49,7 @@ setup_exe = 'WoT_Modpack_by_Niedvin_Setup.exe'
 subprocess.check_call([
     csc_path, '/target:winexe', '/platform:anycpu', '/optimize+', '/codepage:65001',
     '/win32manifest:scratch\\app.manifest', '/win32icon:scratch\\app.ico',
-    '/r:System.Web.Extensions.dll', '/r:System.IO.Compression.dll',
+    '/r:System.Core.dll', '/r:System.Web.Extensions.dll', '/r:System.IO.Compression.dll',
     '/r:System.IO.Compression.FileSystem.dll',
     r'/resource:build\payload.zip,WotModpackInstaller.payload.zip',
     '/out:' + setup_exe, r'scratch\Installer.cs'
