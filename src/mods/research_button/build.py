@@ -11,7 +11,7 @@ from mono_build import build as build_mono, game_version, MEMBER
 
 ROOT = Path(__file__).resolve().parents[2]
 WORK = Path(__file__).resolve().parent
-VERSION = '1.2.4'
+VERSION = '1.2.5'
 MOD_ID = 'ua.research_button'
 MOD_NAME = '%s_%s.wotmod' % (MOD_ID, VERSION)
 ENTRY = 'res/scripts/client/gui/mods/mod_research_button.pyc'

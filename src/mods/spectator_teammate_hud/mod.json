@@ -3,10 +3,10 @@
   "dir": "spectator_teammate_hud",
   "id": "spectator_teammate_hud",
   "title": "Spectator+",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "author": "Niedvin",
   "description": "Відображає приціл у реальному часі, таймер перезарядки, стан модулів і екіпажу, а також таймери перезарядки спорядження союзника, за яким ви спостерігаєте після знищення вашого танка.",
-  "changes": "Таймер перезарядки більше не смикається назад під час спостереження.",
+  "changes": "Помилка запису маркера більше не ламає рідний приціл; обробники пакетів захищені від винятків, і менше роботи виконується на кожному кадрі.",
   "default_checked": true,
   "clean_patterns": [
     "ua.spectator_teammate_hud*.wotmod"
@@ -36,14 +36,14 @@
     ],
     "outputs": [
       {
-        "to": "build/mods/{ver}/ua.spectator_teammate_hud_1.0.11.wotmod"
+        "to": "build/mods/{ver}/ua.spectator_teammate_hud_1.0.12.wotmod"
       }
     ]
   },
   "files": [
     {
-      "source": "build/mods/{ver}/ua.spectator_teammate_hud_1.0.11.wotmod",
-      "target": "game_files/mods/_VERSION_/ua.spectator_teammate_hud_1.0.11.wotmod"
+      "source": "build/mods/{ver}/ua.spectator_teammate_hud_1.0.12.wotmod",
+      "target": "game_files/mods/_VERSION_/ua.spectator_teammate_hud_1.0.12.wotmod"
     },
     {
       "source": "mods/configs/spectator_teammate_hud/config.json",
@@ -61,6 +61,7 @@
     "ua.spectator_teammate_hud_1.0.7.wotmod",
     "ua.spectator_teammate_hud_1.0.8.wotmod",
     "ua.spectator_teammate_hud_1.0.9.wotmod",
-    "ua.spectator_teammate_hud_1.0.10.wotmod"
+    "ua.spectator_teammate_hud_1.0.10.wotmod",
+    "ua.spectator_teammate_hud_1.0.11.wotmod"
   ]
 }
