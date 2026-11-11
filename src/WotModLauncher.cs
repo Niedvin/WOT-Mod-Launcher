@@ -23,8 +23,8 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("Niedvin")]
 [assembly: AssemblyProduct("WoT Modpack by Niedvin")]
 [assembly: AssemblyCopyright("Copyright © 2026 Niedvin")]
-[assembly: AssemblyFileVersion("1.4.3.0")]
-[assembly: AssemblyVersion("1.4.3.0")]
+[assembly: AssemblyFileVersion("1.4.3.1")]
+[assembly: AssemblyVersion("1.4.3.1")]
 
 namespace WotModLauncher
 {
@@ -1858,14 +1858,14 @@ namespace WotModLauncher
                     if (update.IsNew)
                     {
                         string newFile = Path.Combine(destDir, remote.file);
-                        if (File.Exists(newFile))
+                        if (File.Exists(newFile) || Directory.Exists(newFile))
                         {
                             if (!backupReady) { Directory.CreateDirectory(bkpDir); backupReady = true; }
                             string bkpFile = Path.Combine(bkpDir, GetBackupRelativePath(newFile));
                             Directory.CreateDirectory(Path.GetDirectoryName(bkpFile));
-                            File.Copy(newFile, bkpFile, true);
+                            BackupPath(newFile, bkpFile);
                             replacedPairs.Add(new string[] { bkpFile, newFile, newFile });
-                            File.Delete(newFile);
+                            DeletePath(newFile);
                         }
                         else
                         {
@@ -1884,8 +1884,19 @@ namespace WotModLauncher
                         string newDestPath = Path.Combine(destDir, remote.file);
                         replacedPairs.Add(new string[] { bkpFile, update.LocalFilePath, newDestPath });
                         if (!SamePath(update.LocalFilePath, newDestPath))
-                            File.Delete(update.LocalFilePath);
-                        if (File.Exists(newDestPath)) File.Delete(newDestPath);
+                            DeletePath(update.LocalFilePath);
+                        if (File.Exists(newDestPath) || Directory.Exists(newDestPath))
+                        {
+                            // A folder can sit where the new package must go; keep it for rollback too — 2026-11-11
+                            if (!SamePath(update.LocalFilePath, newDestPath))
+                            {
+                                string collisionBkp = Path.Combine(bkpDir, "_collisions", Guid.NewGuid().ToString("N"), GetBackupRelativePath(newDestPath));
+                                Directory.CreateDirectory(Path.GetDirectoryName(collisionBkp));
+                                BackupPath(newDestPath, collisionBkp);
+                                replacedPairs.Add(new string[] { collisionBkp, newDestPath, newDestPath });
+                            }
+                            DeletePath(newDestPath);
+                        }
                         File.Move(tmpFile, newDestPath);
                     }
 
@@ -1910,8 +1921,19 @@ namespace WotModLauncher
                     string[] pair = replacedPairs[i];
                     try
                     {
-                        if (File.Exists(pair[2])) File.Delete(pair[2]);
-                        if (pair[0] != null && File.Exists(pair[0])) File.Copy(pair[0], pair[1], true);
+                        DeletePath(pair[2]);
+                        if (pair[0] == null) continue;
+                        if (File.Exists(pair[0]))
+                        {
+                            if (Directory.Exists(pair[1])) Directory.Delete(pair[1], true);
+                            Directory.CreateDirectory(Path.GetDirectoryName(pair[1]));
+                            File.Copy(pair[0], pair[1], true);
+                        }
+                        else if (Directory.Exists(pair[0]))
+                        {
+                            DeletePath(pair[1]);
+                            CopyDirectory(pair[0], pair[1]);
+                        }
                     }
                     catch { }
                 }
@@ -1956,6 +1978,34 @@ namespace WotModLauncher
         private static bool SamePath(string first, string second)
         {
             return string.Equals(Path.GetFullPath(first), Path.GetFullPath(second), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void DeletePath(string path)
+        {
+            if (File.Exists(path)) File.Delete(path);
+            else if (Directory.Exists(path)) Directory.Delete(path, true);
+        }
+
+        private static void BackupPath(string source, string target)
+        {
+            if (File.Exists(source))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(target));
+                File.Copy(source, target, true);
+            }
+            else if (Directory.Exists(source))
+            {
+                CopyDirectory(source, target);
+            }
+        }
+
+        private static void CopyDirectory(string source, string target)
+        {
+            Directory.CreateDirectory(target);
+            foreach (string file in Directory.GetFiles(source))
+                File.Copy(file, Path.Combine(target, Path.GetFileName(file)), true);
+            foreach (string directory in Directory.GetDirectories(source))
+                CopyDirectory(directory, Path.Combine(target, Path.GetFileName(directory)));
         }
 
         private void DownloadFileWithProgress(string url, string dstPath, long expectedSize, ref long doneBytes, long totalBytes)
