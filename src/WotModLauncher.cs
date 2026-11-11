@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -13,6 +14,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
@@ -21,8 +23,8 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("Niedvin")]
 [assembly: AssemblyProduct("WoT Modpack by Niedvin")]
 [assembly: AssemblyCopyright("Copyright © 2026 Niedvin")]
-[assembly: AssemblyFileVersion("1.4.2.0")]
-[assembly: AssemblyVersion("1.4.2.0")]
+[assembly: AssemblyFileVersion("1.4.3.0")]
+[assembly: AssemblyVersion("1.4.3.0")]
 
 namespace WotModLauncher
 {
@@ -194,6 +196,8 @@ namespace WotModLauncher
 
             // .NET 4.0 defaults to TLS 1.0 which GitHub drops — 2026-10-24
             ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
+            // Default is 2 per host; the atomic update phase downloads up to 4 packages at once — 2026-11-11
+            ServicePointManager.DefaultConnectionLimit = 8;
 
             bool checkOnly = false;
             bool updateOnly = false;
@@ -227,15 +231,27 @@ namespace WotModLauncher
             }
 
             LauncherConfig cfg = LoadConfig(argGamePath);
-            if (cfg == null || string.IsNullOrEmpty(cfg.game_path) || !Directory.Exists(cfg.game_path))
+            if (cfg == null || string.IsNullOrEmpty(cfg.game_path) || !IsGameDirectory(cfg.game_path))
             {
-                if (!checkOnly && !updateOnly && !string.IsNullOrEmpty(argGamePath))
-                    LaunchGame(argGamePath);
+                if (!checkOnly && !updateOnly)
+                {
+                    if (!string.IsNullOrEmpty(argGamePath))
+                        LaunchGame(argGamePath);
+                    else
+                        MessageBox.Show(
+                            "Не вдалося знайти папку World of Tanks.\nЗапустіть інсталятор модпаку і вкажіть шлях до гри — після цього ярлик працюватиме.",
+                            "WoT Modpack Launcher", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
                 return 1;
             }
 
             if (string.IsNullOrEmpty(ManifestOverride) && !string.IsNullOrEmpty(cfg.manifest_url))
                 ManifestOverride = cfg.manifest_url;
+
+            ManifestRoot fetchedManifest = null;
+            Thread manifestThread = new Thread(() => { fetchedManifest = FetchManifestWithTimeout(6000); });
+            manifestThread.IsBackground = true;
+            manifestThread.Start();
 
             if (cfg.hijack_shortcuts)
                 EnsureShortcutsRedirected(cfg.game_path);
@@ -258,15 +274,12 @@ namespace WotModLauncher
             bool applyLauncherUpdate = true;
             SelfUpdateState selfUpdatePlan = null;
             List<string> declinedMods = LoadDeclinedMods();
-            ManifestRoot manifest = FetchManifestWithTimeout(4000);
+            ManifestRoot manifest = manifestThread.Join(6000) ? SanitizeManifest(fetchedManifest) : null;
             if (manifest != null)
             {
                 selfUpdatePlan = GetSelfUpdatePlan(manifest.launcher);
                 if (string.IsNullOrEmpty(activeVer)) activeVer = manifest.game_version;
                 List<PendingModUpdate> updates = FindPendingUpdates(cfg.game_path, activeVer, manifest, cfg.skip_mods, declinedMods);
-                foreach (PendingModUpdate update in updates)
-                {
-                }
                 if (selfUpdatePlan == null && !checkOnly && !updateOnly)
                     selfUpdatePlan = LoadPendingUpdateState();
                 if (!checkOnly && (updates.Count > 0 || selfUpdatePlan != null))
@@ -278,9 +291,6 @@ namespace WotModLauncher
                         applyLauncherUpdate = form.ApplyLauncherUpdate;
                     }
                 }
-            }
-            else
-            {
             }
             if (selfUpdatePlan == null && !checkOnly && !updateOnly)
                 selfUpdatePlan = LoadPendingUpdateState();
@@ -315,12 +325,38 @@ namespace WotModLauncher
 
         private static bool IsGameAlreadyRunning()
         {
+            List<Process> processes = FindGameProcesses();
             try
             {
-                return Process.GetProcessesByName("WorldOfTanks").Length > 0
-                    || Process.GetProcessesByName("WorldOfTanks32").Length > 0;
+                return processes.Count > 0;
             }
-            catch { return false; }
+            finally
+            {
+                foreach (Process process in processes)
+                {
+                    try { process.Dispose(); } catch { }
+                }
+            }
+        }
+
+        private static List<Process> FindGameProcesses()
+        {
+            var result = new List<Process>();
+            try
+            {
+                result.AddRange(Process.GetProcessesByName("WorldOfTanks"));
+                result.AddRange(Process.GetProcessesByName("WorldOfTanks32"));
+            }
+            catch { }
+            return result;
+        }
+
+        private static bool IsGameDirectory(string path)
+        {
+            if (string.IsNullOrEmpty(path) || !Directory.Exists(path)) return false;
+            return File.Exists(Path.Combine(path, "WorldOfTanks.exe"))
+                || File.Exists(Path.Combine(path, "win64", "WorldOfTanks.exe"))
+                || File.Exists(Path.Combine(path, "version.xml"));
         }
 
         private static LauncherConfig LoadConfig(string overrideGamePath)
@@ -340,11 +376,22 @@ namespace WotModLauncher
             if (!string.IsNullOrEmpty(overrideGamePath))
                 cfg.game_path = overrideGamePath;
 
-            if (string.IsNullOrEmpty(cfg.game_path) || !Directory.Exists(cfg.game_path))
+            if (!IsGameDirectory(cfg.game_path))
             {
-                string baseDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/');
-                if (File.Exists(Path.Combine(baseDir, "WorldOfTanks.exe")) && File.Exists(Path.Combine(baseDir, "version.xml")))
-                    cfg.game_path = baseDir;
+                // Hijacked shortcuts set the game as the working directory even without launcher.json — 2026-11-11
+                string[] candidates = new string[]
+                {
+                    AppDomain.CurrentDomain.BaseDirectory,
+                    Environment.CurrentDirectory
+                };
+                foreach (string candidate in candidates)
+                {
+                    if (IsGameDirectory(candidate))
+                    {
+                        cfg.game_path = candidate;
+                        break;
+                    }
+                }
             }
             return cfg;
         }
@@ -464,7 +511,7 @@ namespace WotModLauncher
 
             try
             {
-                HttpWebRequest req = (HttpWebRequest)WebRequest.Create(target + "?t=" + Environment.TickCount);
+                HttpWebRequest req = (HttpWebRequest)WebRequest.Create(AddCacheBuster(target));
                 req.UserAgent = "WotModLauncher/" + LauncherVersion;
                 req.Timeout = timeoutMs;
                 req.ReadWriteTimeout = timeoutMs;
@@ -484,10 +531,99 @@ namespace WotModLauncher
             }
         }
 
+        private static bool IsSafePathSegment(string segment)
+        {
+            if (string.IsNullOrEmpty(segment) || segment == "." || segment == ".." || segment.Length > 100)
+                return false;
+            if (segment.IndexOf(':') >= 0) return false;
+            return segment.IndexOfAny(Path.GetInvalidFileNameChars()) < 0;
+        }
+
+        private static bool IsSafeManifestFile(string file)
+        {
+            if (!IsSafePathSegment(file)) return false;
+            return file.EndsWith(".wotmod", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsSafeRelativeDir(string subdir)
+        {
+            if (string.IsNullOrEmpty(subdir)) return true;
+            if (subdir.Length > 240) return false;
+            foreach (string segment in subdir.Split('/', '\\'))
+                if (!IsSafePathSegment(segment)) return false;
+            return true;
+        }
+
+        private static bool IsSafeUrl(string url)
+        {
+            if (string.IsNullOrEmpty(url)) return false;
+            if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+                || url.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+                return true;
+            try { return Path.IsPathRooted(url); }
+            catch { return false; }
+        }
+
+        private static bool IsHexSha256(string value)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length != 64) return false;
+            foreach (char c in value)
+                if (!Uri.IsHexDigit(c)) return false;
+            return true;
+        }
+
+        private static bool IsSafeModId(string id)
+        {
+            return !string.IsNullOrEmpty(id) && Regex.IsMatch(id, @"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$");
+        }
+
+        private static bool IsValidManifestMod(ManifestModEntry entry)
+        {
+            if (entry == null || !IsSafeModId(entry.id)) return false;
+            if (ParseVer(entry.version) == null) return false;
+            if (!IsSafeManifestFile(entry.file)) return false;
+            if (!IsSafeRelativeDir(entry.subdir)) return false;
+            if (!IsSafeUrl(entry.url)) return false;
+            if (!IsHexSha256(entry.sha256)) return false;
+            return entry.size >= 0;
+        }
+
+        private static ManifestRoot SanitizeManifest(ManifestRoot manifest)
+        {
+            if (manifest == null) return null;
+            if (manifest.launcher != null)
+            {
+                if (string.IsNullOrEmpty(manifest.launcher.url)
+                    || !IsSafeUrl(manifest.launcher.url)
+                    || !IsHexSha256(manifest.launcher.sha256))
+                    manifest.launcher = null;
+            }
+            if (!string.IsNullOrEmpty(manifest.game_version)
+                && !Regex.IsMatch(manifest.game_version, @"^[0-9]+(\.[0-9]+){1,3}$"))
+                manifest.game_version = null;
+            if (manifest.mods != null)
+            {
+                var valid = new List<ManifestModEntry>();
+                foreach (ManifestModEntry entry in manifest.mods)
+                    if (IsValidManifestMod(entry)) valid.Add(entry);
+                int skipped = manifest.mods.Count - valid.Count;
+                if (skipped > 0)
+                    LogSelfUpdate("manifest: skipped " + skipped + " invalid mod entries");
+                manifest.mods = valid;
+            }
+            return manifest;
+        }
+
         private static SelfUpdateState GetSelfUpdatePlan(ManifestLauncherInfo info)
         {
             if (info == null || string.IsNullOrEmpty(info.version) || string.IsNullOrEmpty(info.url))
                 return null;
+            if (!IsSafeUrl(info.url) || !IsHexSha256(info.sha256))
+            {
+                LogSelfUpdate("manifest: launcher update ignored, missing url or sha256");
+                return null;
+            }
 
             Version curV = Quad(ParseVer(LauncherVersion));
             Version remV = Quad(ParseVer(info.version));
@@ -515,6 +651,8 @@ namespace WotModLauncher
         {
             SelfUpdateState state = LoadSelfUpdateState();
             if (state == null || string.IsNullOrEmpty(state.version) || string.IsNullOrEmpty(state.url))
+                return null;
+            if (!IsSafeUrl(state.url) || !IsHexSha256(state.sha256))
                 return null;
             Version curV = Quad(ParseVer(LauncherVersion));
             Version remV = Quad(ParseVer(state.version));
@@ -561,6 +699,12 @@ namespace WotModLauncher
                 SelfUpdateState state = LoadSelfUpdateState();
                 if (state == null || string.IsNullOrEmpty(state.version) || string.IsNullOrEmpty(state.url))
                     return 0;
+                if (!IsSafeUrl(state.url) || !IsHexSha256(state.sha256))
+                {
+                    LogSelfUpdate("self-update state has no trusted url or sha256, discarded");
+                    TryDeleteFile(SelfUpdateStatePath);
+                    return 1;
+                }
 
                 Version curV = Quad(ParseVer(LauncherVersion));
                 Version remV = Quad(ParseVer(state.version));
@@ -581,7 +725,7 @@ namespace WotModLauncher
                     else
                         DownloadLauncherFile(AddCacheBuster(state.url), tmp);
 
-                    if (!string.IsNullOrEmpty(state.sha256) && !VerifySha256(tmp, state.sha256))
+                    if (!VerifySha256(tmp, state.sha256))
                         throw new InvalidDataException("SHA-256 mismatch");
                     Version fileV = Quad(GetExeVersion(tmp));
                     if (fileV == null || fileV < remV)
@@ -642,7 +786,13 @@ namespace WotModLauncher
                 }
 
                 SelfUpdateState state = LoadSelfUpdateState();
-                if (state != null && !string.IsNullOrEmpty(state.sha256) && !VerifySha256(newPath, state.sha256))
+                if (state == null || !IsHexSha256(state.sha256))
+                {
+                    TryDeleteFile(newPath);
+                    LogSelfUpdate("pending launcher has no sha256, discarded");
+                    return;
+                }
+                if (!VerifySha256(newPath, state.sha256))
                 {
                     TryDeleteFile(newPath);
                     LogSelfUpdate("pending launcher hash mismatch, discarded");
@@ -707,10 +857,10 @@ namespace WotModLauncher
             }
         }
 
-        private static string AddCacheBuster(string url)
+        internal static string AddCacheBuster(string url)
         {
-            if (string.IsNullOrEmpty(url) || url.IndexOf('?') >= 0) return url;
-            return url + "?t=" + Environment.TickCount;
+            if (string.IsNullOrEmpty(url)) return url;
+            return url + (url.IndexOf('?') >= 0 ? "&" : "?") + "t=" + Environment.TickCount;
         }
 
         private static Version GetExeVersion(string path)
@@ -741,7 +891,7 @@ namespace WotModLauncher
             catch { }
         }
 
-        private static void TryDeleteFile(string path)
+        internal static void TryDeleteFile(string path)
         {
             try { if (File.Exists(path)) File.Delete(path); } catch { }
         }
@@ -765,13 +915,16 @@ namespace WotModLauncher
             var result = new List<PendingModUpdate>();
             if (manifest == null || manifest.mods == null || string.IsNullOrEmpty(gameVer))
                 return result;
+            if (!Regex.IsMatch(gameVer, @"^[0-9]+(\.[0-9]+){1,3}$"))
+                return result;
 
             string verRoot = Path.Combine(gamePath, "mods", gameVer);
             Directory.CreateDirectory(verRoot);
+            var idIndex = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
 
             foreach (ManifestModEntry entry in manifest.mods)
             {
-                if (entry == null || string.IsNullOrEmpty(entry.id) || string.IsNullOrEmpty(entry.version) || string.IsNullOrEmpty(entry.file))
+                if (!IsValidManifestMod(entry))
                     continue;
                 if (IsSkipped(skipMods, entry.id) || IsSkipped(declinedMods, entry.id))
                     continue;
@@ -803,17 +956,20 @@ namespace WotModLauncher
                     // manifest ids were shortened to server_online while files keep ua.* names — 2026-11-09
                     if (foundFile == null)
                     {
-                        foreach (string f in Directory.GetFiles(searchDir, "*.wotmod", SearchOption.TopDirectoryOnly))
+                        Dictionary<string, string> ids;
+                        if (!idIndex.TryGetValue(searchDir, out ids))
                         {
-                            if (!string.Equals(ReadWotmodId(f), entry.id, StringComparison.OrdinalIgnoreCase))
-                                continue;
-                            Match mv = Regex.Match(Path.GetFileName(f), @"_([0-9]+(?:\.[0-9]+)*)\.wotmod$", RegexOptions.IgnoreCase);
-                            if (!mv.Success) continue;
-                            Version v = ParseVer(mv.Groups[1].Value);
-                            if (v != null && (foundVer == null || v > foundVer))
+                            ids = BuildWotmodIdIndex(searchDir);
+                            idIndex[searchDir] = ids;
+                        }
+                        string candidate;
+                        if (ids.TryGetValue(entry.id, out candidate))
+                        {
+                            Match mv = Regex.Match(Path.GetFileName(candidate), @"_([0-9]+(?:\.[0-9]+)*)\.wotmod$", RegexOptions.IgnoreCase);
+                            if (mv.Success)
                             {
-                                foundVer = v;
-                                foundFile = f;
+                                foundVer = ParseVer(mv.Groups[1].Value);
+                                if (foundVer != null) foundFile = candidate;
                             }
                         }
                     }
@@ -845,6 +1001,29 @@ namespace WotModLauncher
                         InstalledVersion = foundVer.ToString()
                     });
                 }
+            }
+            return result;
+        }
+
+        private static Dictionary<string, string> BuildWotmodIdIndex(string directory)
+        {
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (!Directory.Exists(directory)) return result;
+            foreach (string file in Directory.GetFiles(directory, "*.wotmod", SearchOption.TopDirectoryOnly))
+            {
+                string id = ReadWotmodId(file);
+                if (string.IsNullOrEmpty(id)) continue;
+                Match mv = Regex.Match(Path.GetFileName(file), @"_([0-9]+(?:\.[0-9]+)*)\.wotmod$", RegexOptions.IgnoreCase);
+                Version version = mv.Success ? ParseVer(mv.Groups[1].Value) : null;
+                string existing;
+                if (result.TryGetValue(id, out existing))
+                {
+                    Match ev = Regex.Match(Path.GetFileName(existing), @"_([0-9]+(?:\.[0-9]+)*)\.wotmod$", RegexOptions.IgnoreCase);
+                    Version existingVersion = ev.Success ? ParseVer(ev.Groups[1].Value) : null;
+                    if (version == null || (existingVersion != null && version <= existingVersion))
+                        continue;
+                }
+                result[id] = file;
             }
             return result;
         }
@@ -1111,6 +1290,7 @@ namespace WotModLauncher
 
         private bool isLoading;
         private bool isUpdating;
+        private int lastReportedProgress = -1;
 
         public bool LaunchWithoutMods { get; private set; }
         public bool ApplyLauncherUpdate { get; private set; }
@@ -1616,60 +1796,100 @@ namespace WotModLauncher
         {
             string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
             string bkpDir = Path.Combine(gamePath, ".backups", "launcher", stamp);
-            List<string[]> replacedPairs = new List<string[]>();
+            var tempFiles = new List<string>();
+            var replacedPairs = new List<string[]>();
+            bool backupReady = false;
+            lastReportedProgress = -1;
 
             try
             {
-                Directory.CreateDirectory(bkpDir);
                 int total = selected.Count;
+                string[] downloaded = new string[total];
+                long totalBytes = 0;
+                for (int i = 0; i < total; i++)
+                    totalBytes += Math.Max(1L, selected[i].Remote.size);
+                long doneBytes = 0;
+                var errors = new ConcurrentQueue<Exception>();
+                var tempLock = new object();
+
+                // Download and verify every package before the first installed file is touched — 2026-11-11
+                ParallelOptions options = new ParallelOptions { MaxDegreeOfParallelism = 4 };
+                Parallel.For(0, total, options, i =>
+                {
+                    PendingModUpdate update = selected[i];
+                    ManifestModEntry remote = update.Remote;
+                    string tmpFile = Path.Combine(Path.GetTempPath(), "wot-upd-" + Guid.NewGuid().ToString("N") + ".wotmod");
+                    lock (tempLock) tempFiles.Add(tmpFile);
+                    try
+                    {
+                        SetStatus(string.Format("Завантаження ({0}/{1}): {2} v{3}...", i + 1, total, remote.title ?? remote.id, remote.version));
+                        DownloadFileWithProgress(remote.url, tmpFile, remote.size, ref doneBytes, totalBytes);
+
+                        if (remote.size > 0 && new FileInfo(tmpFile).Length != remote.size)
+                            throw new InvalidDataException("Розмір файлу не збігається для " + remote.file);
+                        if (!Program.VerifySha256(tmpFile, remote.sha256))
+                            throw new InvalidDataException("Контрольна сума SHA-256 не збігається для " + remote.file);
+                        if (!Program.VerifyWotmodArchive(tmpFile, remote.id))
+                            throw new InvalidDataException("Пакет .wotmod пошкоджений або має інший ID: " + remote.file);
+                        downloaded[i] = tmpFile;
+                    }
+                    catch (Exception ex)
+                    {
+                        errors.Enqueue(ex);
+                    }
+                });
+
+                Exception downloadError;
+                if (errors.TryDequeue(out downloadError))
+                    throw downloadError;
+
                 for (int i = 0; i < total; i++)
                 {
                     PendingModUpdate update = selected[i];
                     ManifestModEntry remote = update.Remote;
-                    SetStatus(string.Format("Завантаження ({0}/{1}): {2} v{3}...", i + 1, total, remote.title ?? remote.id, remote.version));
-
-                    string tmpFile = Path.Combine(Path.GetTempPath(), "wot-upd-" + Guid.NewGuid().ToString("N") + ".wotmod");
-                    DownloadFileWithProgress(remote.url, tmpFile, i, total);
-
-                    if (remote.size > 0 && new FileInfo(tmpFile).Length != remote.size)
-                    {
-                        File.Delete(tmpFile);
-                        throw new InvalidDataException("Розмір файлу не збігається для " + remote.file);
-                    }
-                    if (!string.IsNullOrEmpty(remote.sha256) && !Program.VerifySha256(tmpFile, remote.sha256))
-                    {
-                        File.Delete(tmpFile);
-                        throw new InvalidDataException("Контрольна сума SHA-256 не збігається для " + remote.file);
-                    }
-                    if (!Program.VerifyWotmodArchive(tmpFile, remote.id))
-                    {
-                        File.Delete(tmpFile);
-                        throw new InvalidDataException("Пакет .wotmod пошкоджений або має інший ID: " + remote.file);
-                    }
+                    string tmpFile = downloaded[i];
+                    if (string.IsNullOrEmpty(tmpFile))
+                        throw new InvalidDataException("Пакет не завантажено: " + remote.file);
 
                     string destDir = Path.GetDirectoryName(update.LocalFilePath);
                     Directory.CreateDirectory(destDir);
+
                     if (update.IsNew)
                     {
                         string newFile = Path.Combine(destDir, remote.file);
-                        if (File.Exists(newFile)) File.Delete(newFile);
+                        if (File.Exists(newFile))
+                        {
+                            if (!backupReady) { Directory.CreateDirectory(bkpDir); backupReady = true; }
+                            string bkpFile = Path.Combine(bkpDir, GetBackupRelativePath(newFile));
+                            Directory.CreateDirectory(Path.GetDirectoryName(bkpFile));
+                            File.Copy(newFile, bkpFile, true);
+                            replacedPairs.Add(new string[] { bkpFile, newFile, newFile });
+                            File.Delete(newFile);
+                        }
+                        else
+                        {
+                            replacedPairs.Add(new string[] { null, newFile, newFile });
+                        }
                         File.Move(tmpFile, newFile);
-                        replacedPairs.Add(new string[] { null, newFile, newFile });
-                        SetProgress((int)((i + 1) * 100.0 / total));
-                        continue;
+                    }
+                    else
+                    {
+                        if (!backupReady) { Directory.CreateDirectory(bkpDir); backupReady = true; }
+                        string relOld = GetBackupRelativePath(update.LocalFilePath);
+                        string bkpFile = Path.Combine(bkpDir, relOld);
+                        Directory.CreateDirectory(Path.GetDirectoryName(bkpFile));
+                        File.Copy(update.LocalFilePath, bkpFile, true);
+
+                        string newDestPath = Path.Combine(destDir, remote.file);
+                        replacedPairs.Add(new string[] { bkpFile, update.LocalFilePath, newDestPath });
+                        if (!SamePath(update.LocalFilePath, newDestPath))
+                            File.Delete(update.LocalFilePath);
+                        if (File.Exists(newDestPath)) File.Delete(newDestPath);
+                        File.Move(tmpFile, newDestPath);
                     }
 
-                    string relOld = update.LocalFilePath.Substring(gamePath.Length).TrimStart('\\', '/');
-                    string bkpFile = Path.Combine(bkpDir, relOld);
-                    Directory.CreateDirectory(Path.GetDirectoryName(bkpFile));
-                    File.Copy(update.LocalFilePath, bkpFile, true);
-
-                    string newDestPath = Path.Combine(destDir, remote.file);
-                    File.Delete(update.LocalFilePath);
-                    if (File.Exists(newDestPath)) File.Delete(newDestPath);
-                    File.Move(tmpFile, newDestPath);
-                    replacedPairs.Add(new string[] { bkpFile, update.LocalFilePath, newDestPath });
-                    SetProgress((int)((i + 1) * 100.0 / total));
+                    lock (tempLock) tempFiles.Remove(tmpFile);
+                    SetProgress(80 + (int)((i + 1) * 20.0 / total));
                 }
 
                 SetProgress(100);
@@ -1683,8 +1903,10 @@ namespace WotModLauncher
             }
             catch (Exception ex)
             {
-                foreach (string[] pair in replacedPairs)
+                Exception actual = Unwrap(ex);
+                for (int i = replacedPairs.Count - 1; i >= 0; i--)
                 {
+                    string[] pair = replacedPairs[i];
                     try
                     {
                         if (File.Exists(pair[2])) File.Delete(pair[2]);
@@ -1693,28 +1915,59 @@ namespace WotModLauncher
                     catch { }
                 }
 
-                BeginInvoke(new Action(() =>
+                try
                 {
-                    isUpdating = false;
-                    MessageBox.Show(
-                        "Оновлення не вдалося (" + ex.Message + ").\nВідновлено попередні версії модів, запускаємо гру.",
-                        "WoT Modpack Launcher", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    Close();
-                }));
+                    BeginInvoke(new Action(() =>
+                    {
+                        isUpdating = false;
+                        MessageBox.Show(
+                            "Оновлення не вдалося (" + actual.Message + ").\nВідновлено попередні версії модів, запускаємо гру.",
+                            "WoT Modpack Launcher", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        Close();
+                    }));
+                }
+                catch { }
+            }
+            finally
+            {
+                foreach (string temp in tempFiles)
+                    Program.TryDeleteFile(temp);
             }
         }
 
-        private void DownloadFileWithProgress(string url, string dstPath, int index, int total)
+        private static Exception Unwrap(Exception ex)
+        {
+            AggregateException aggregate = ex as AggregateException;
+            if (aggregate != null && aggregate.InnerExceptions.Count > 0)
+                return aggregate.InnerExceptions[0];
+            return ex;
+        }
+
+        private string GetBackupRelativePath(string filePath)
+        {
+            string root = Path.GetFullPath(gamePath).TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
+            string full = Path.GetFullPath(filePath);
+            if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Файл поза папкою гри: " + filePath);
+            return full.Substring(root.Length);
+        }
+
+        private static bool SamePath(string first, string second)
+        {
+            return string.Equals(Path.GetFullPath(first), Path.GetFullPath(second), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void DownloadFileWithProgress(string url, string dstPath, long expectedSize, ref long doneBytes, long totalBytes)
         {
             string localSrc = Program.ResolveLocalUrl(url);
             if (localSrc != null)
             {
                 File.Copy(localSrc, dstPath, true);
-                SetProgress((int)((index + 1) * 100.0 / total));
+                ReportByteProgress(ref doneBytes, expectedSize > 0 ? expectedSize : new FileInfo(dstPath).Length, totalBytes);
                 return;
             }
 
-            HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
+            HttpWebRequest req = (HttpWebRequest)WebRequest.Create(Program.AddCacheBuster(url));
             req.UserAgent = "WotModLauncher/" + Program.LauncherVersion;
             req.Timeout = 15000;
             req.ReadWriteTimeout = 15000;
@@ -1722,26 +1975,28 @@ namespace WotModLauncher
             using (Stream stream = resp.GetResponseStream())
             using (FileStream file = File.Create(dstPath))
             {
-                long length = resp.ContentLength;
                 byte[] buffer = new byte[16384];
-                long readTotal = 0;
-                int lastPct = -1;
                 int n;
                 while ((n = stream.Read(buffer, 0, buffer.Length)) > 0)
                 {
                     file.Write(buffer, 0, n);
-                    readTotal += n;
-                    if (length > 0)
-                    {
-                        int pct = (int)((index + (float)readTotal / length) * 100.0 / total);
-                        if (pct != lastPct)
-                        {
-                            lastPct = pct;
-                            SetProgress(pct);
-                        }
-                    }
+                    ReportByteProgress(ref doneBytes, n, totalBytes);
                 }
             }
+        }
+
+        private void ReportByteProgress(ref long doneBytes, long added, long totalBytes)
+        {
+            long done = Interlocked.Add(ref doneBytes, added);
+            int pct = totalBytes > 0 ? (int)(done * 80L / totalBytes) : 0;
+            int previous;
+            do
+            {
+                previous = lastReportedProgress;
+                if (pct <= previous) return;
+            }
+            while (Interlocked.CompareExchange(ref lastReportedProgress, pct, previous) != previous);
+            SetProgress(pct);
         }
 
         private void SetStatus(string text)
