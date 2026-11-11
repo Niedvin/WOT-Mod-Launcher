@@ -23,8 +23,8 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("Niedvin")]
 [assembly: AssemblyProduct("WoT Modpack by Niedvin")]
 [assembly: AssemblyCopyright("Copyright © 2026 Niedvin")]
-[assembly: AssemblyFileVersion("1.4.3.1")]
-[assembly: AssemblyVersion("1.4.3.1")]
+[assembly: AssemblyFileVersion("1.4.3.2")]
+[assembly: AssemblyVersion("1.4.3.2")]
 
 namespace WotModLauncher
 {
@@ -1853,6 +1853,8 @@ namespace WotModLauncher
                         throw new InvalidDataException("Пакет не завантажено: " + remote.file);
 
                     string destDir = Path.GetDirectoryName(update.LocalFilePath);
+                    if (File.Exists(destDir))
+                        throw new InvalidDataException("Не вдалося оновити " + remote.file + ": шлях " + destDir + " зайнятий файлом.");
                     Directory.CreateDirectory(destDir);
 
                     if (update.IsNew)
@@ -1876,27 +1878,28 @@ namespace WotModLauncher
                     else
                     {
                         if (!backupReady) { Directory.CreateDirectory(bkpDir); backupReady = true; }
+                        string newDestPath = Path.Combine(destDir, remote.file);
                         string relOld = GetBackupRelativePath(update.LocalFilePath);
                         string bkpFile = Path.Combine(bkpDir, relOld);
+
+                        // A folder can sit where the new package must go; back it up before the update pair — 2026-11-11
+                        if (!SamePath(update.LocalFilePath, newDestPath)
+                            && (File.Exists(newDestPath) || Directory.Exists(newDestPath)))
+                        {
+                            string collisionBkp = Path.Combine(bkpDir, "_collisions", Guid.NewGuid().ToString("N"), GetBackupRelativePath(newDestPath));
+                            Directory.CreateDirectory(Path.GetDirectoryName(collisionBkp));
+                            BackupPath(newDestPath, collisionBkp);
+                            replacedPairs.Add(new string[] { collisionBkp, newDestPath, newDestPath });
+                            DeletePath(newDestPath);
+                        }
+
                         Directory.CreateDirectory(Path.GetDirectoryName(bkpFile));
                         File.Copy(update.LocalFilePath, bkpFile, true);
-
-                        string newDestPath = Path.Combine(destDir, remote.file);
                         replacedPairs.Add(new string[] { bkpFile, update.LocalFilePath, newDestPath });
                         if (!SamePath(update.LocalFilePath, newDestPath))
                             DeletePath(update.LocalFilePath);
-                        if (File.Exists(newDestPath) || Directory.Exists(newDestPath))
-                        {
-                            // A folder can sit where the new package must go; keep it for rollback too — 2026-11-11
-                            if (!SamePath(update.LocalFilePath, newDestPath))
-                            {
-                                string collisionBkp = Path.Combine(bkpDir, "_collisions", Guid.NewGuid().ToString("N"), GetBackupRelativePath(newDestPath));
-                                Directory.CreateDirectory(Path.GetDirectoryName(collisionBkp));
-                                BackupPath(newDestPath, collisionBkp);
-                                replacedPairs.Add(new string[] { collisionBkp, newDestPath, newDestPath });
-                            }
+                        else
                             DeletePath(newDestPath);
-                        }
                         File.Move(tmpFile, newDestPath);
                     }
 

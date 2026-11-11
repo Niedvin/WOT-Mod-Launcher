@@ -23,8 +23,8 @@ using Microsoft.Win32;
 [assembly: AssemblyCompany("Niedvin")]
 [assembly: AssemblyProduct("WoT Modpack by Niedvin")]
 [assembly: AssemblyCopyright("Copyright © 2026 Niedvin")]
-[assembly: AssemblyFileVersion("1.0.1.0")]
-[assembly: AssemblyVersion("1.0.1.0")]
+[assembly: AssemblyFileVersion("1.0.1.1")]
+[assembly: AssemblyVersion("1.0.1.1")]
 
 namespace WotModpackInstaller
 {
@@ -2033,9 +2033,17 @@ namespace WotModpackInstaller
             return new int[] { removed, backed };
         }
 
-        private int[] InstallModFiles(string gamePath, ModItem mod, string backupDir)
+        internal static void CopyDirectoryTree(string srcDir, string dstDir)
         {
-            int copied = 0, failed = 0, backed = 0;
+            Directory.CreateDirectory(dstDir);
+            foreach (string file in Directory.GetFiles(srcDir))
+                File.Copy(file, Path.Combine(dstDir, Path.GetFileName(file)), true);
+            foreach (string dir in Directory.GetDirectories(srcDir))
+                CopyDirectoryTree(dir, Path.Combine(dstDir, Path.GetFileName(dir)));
+        }
+
+        private int[] InstallModFiles(string gamePath, ModItem mod, string backupDir)
+        {            int copied = 0, failed = 0, backed = 0;
             string srcRoot = Path.Combine(mod.FolderPath, "game_files");
             if (!Directory.Exists(srcRoot))
             {
@@ -2062,6 +2070,31 @@ namespace WotModpackInstaller
                 {
                     Log("    збережено налаштування користувача: " + rel);
                     continue;
+                }
+
+                if (Directory.Exists(destPath))
+                {
+                    if (string.IsNullOrEmpty(backupDir))
+                    {
+                        failed++;
+                        LogFail("    шлях " + rel + " зайнятий папкою, а бекап вимкнено — пропускаю");
+                        continue;
+                    }
+                    try
+                    {
+                        string bkpDirPath = Path.Combine(backupDir, rel);
+                        Directory.CreateDirectory(Path.GetDirectoryName(bkpDirPath));
+                        CopyDirectoryTree(destPath, bkpDirPath);
+                        backed++;
+                        Directory.Delete(destPath, true);
+                        Log("    папку " + rel + " переміщено в бекап перед заміною файлом");
+                    }
+                    catch (Exception ex)
+                    {
+                        failed++;
+                        LogFail("    не вдалося замінити папку " + rel + ": " + RootCause(ex));
+                        continue;
+                    }
                 }
 
                 if (!string.IsNullOrEmpty(backupDir) && File.Exists(destPath))
@@ -3331,7 +3364,7 @@ namespace WotModpackInstaller
 
             string bkp = Path.Combine(backupDir, "configs");
             foreach (string sub in existing)
-                CopyDirectory(Path.Combine(src, sub), Path.Combine(bkp, sub));
+                MainForm.CopyDirectoryTree(Path.Combine(src, sub), Path.Combine(bkp, sub));
 
             foreach (string sub in existing)
             {
@@ -3346,15 +3379,6 @@ namespace WotModpackInstaller
                     owner.LogWarn(@"Не вдалося видалити mods\configs\" + sub + ": " + MainForm.RootCause(ex));
                 }
             }
-        }
-
-        private static void CopyDirectory(string srcDir, string dstDir)
-        {
-            Directory.CreateDirectory(dstDir);
-            foreach (string file in Directory.GetFiles(srcDir))
-                File.Copy(file, Path.Combine(dstDir, Path.GetFileName(file)), true);
-            foreach (string dir in Directory.GetDirectories(srcDir))
-                CopyDirectory(dir, Path.Combine(dstDir, Path.GetFileName(dir)));
         }
     }
 }
