@@ -542,7 +542,8 @@ namespace WotModLauncher
         private static bool IsSafeManifestFile(string file)
         {
             if (!IsSafePathSegment(file)) return false;
-            return file.EndsWith(".wotmod", StringComparison.OrdinalIgnoreCase);
+            if (!file.EndsWith(".wotmod", StringComparison.OrdinalIgnoreCase)) return false;
+            return Regex.IsMatch(file, @"_[0-9]+(\.[0-9]+)*\.wotmod$", RegexOptions.IgnoreCase);
         }
 
         private static bool IsSafeRelativeDir(string subdir)
