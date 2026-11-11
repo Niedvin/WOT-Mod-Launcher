@@ -7,28 +7,28 @@
 
 Лаунчер `WotModLauncher.exe` (встановлюється інсталятором модпаку у `%LOCALAPPDATA%\WotModpack`) при кожному запуску гри:
 
-1. завантажує [manifest.json останнього релізу](https://github.com/Niedvin/WOT-Mod-Launcher/releases/latest/download/manifest.json) (таймаут 4 с);
+1. завантажує [manifest.json останнього релізу](https://github.com/Niedvin/WOT-Mod-Launcher/releases/latest/download/manifest.json) у фоні, поки лаунчер перевіряє теку гри (ліміт 6 с);
 2. звіряє версії встановлених `.wotmod` з маніфестом (ідентифікатор і версія з `meta.xml` / назви файлу), доставляє відсутні моди з маніфесту та пропускає ID зі списку `skip_mods` у `launcher.json` і зі списку відхилених `%LOCALAPPDATA%\WotModpack\declined.json`;
 3. якщо оновлень немає — одразу запускає Wargaming launcher (`wgc_api.exe --open`), без вікна;
 4. якщо оновлення є — показує вікно, яке можна розтягувати: оновлення і нові моди йдуть двома колонками, оновлення лаунчера — окремим рядком зверху, кожен мод можна позначити або зняти окремо; «Без модів» тимчасово перейменовує теку модів поточної версії, і наступний запуск лаунчера повертає її назад;
 5. кнопка «Більше не пропонувати» назавжди приховує вибрані моди: вони більше не встановлюються, не оновлюються і не пропонуються; повернути мод можна, видаливши `%LOCALAPPDATA%\WotModpack\declined.json`;
-6. кожен пакет перевіряється за SHA-256, розміром і `meta.xml` (`<id>`); перед заміною створюється бекап у `<гра>\.backups\launcher\`, при збої старі файли відновлюються;
+6. спершу завантажує й перевіряє всі вибрані пакети (SHA-256, розмір, `meta.xml`), і лише потім замінює файли; перед заміною створює бекап у `<гра>\.backups\launcher\`, при збої відновлює старі файли у зворотному порядку; записи маніфесту без `sha256` або з небезпечним `file`/`subdir` відкидаються;
 7. після запуску гри лаунчер тихо, без вікон, завантажує власне оновлення у фоні та підміняє свій exe; наступний запуск іде вже з новою версією. Якщо підмінити файл не вдалося, новий exe застосовується під час наступного старту;
 8. переносить моди в нову папку версії гри після патчу клієнта.
 
-## Склад модпаку (реліз 2026.11.09, клієнт 2.4.1.1)
+## Склад модпаку (реліз 2026.11.11, клієнт 2.4.1.1)
 
 | Мод | Версія |
 |---|---|
-| Smart Server | 1.1.2 |
-| Squad+ | 1.0.3 |
+| Smart Server | 1.1.3 |
+| Squad+ | 1.0.4 |
 | Velet Penetration | 1.0.2 |
 | ModsSettings API (Izeberg) | 1.7.1 |
 | ModsList API (Poliroid) | 1.8.0 |
 | OpenWG Core & Fixes (3 пакети) | 1.9.0 / 1.1.0 / 1.2.2 |
-| Spectator+ | 1.0.11 |
-| Background FPS Limiter | 1.0.4 |
-| Quick Research | 1.2.4 |
+| Spectator+ | 1.0.12 |
+| Background FPS Limiter | 1.0.5 |
+| Quick Research | 1.2.5 |
 | GPU Boost: Anti-Lag 2 + XeSS (опційно, OpenWG 2.8.3) | 2.8.3.0000 |
 | Appropriate Locker | 1.2.2 |
 
@@ -53,17 +53,19 @@
 ```json
 {
   "schema": 1,
-  "pack_version": "2026.11.01",
+  "pack_version": "2026.11.11",
   "game_version": "2.4.1.1",
-  "launcher": { "version": "1.2.0.0", "url": ".../WotModLauncher.exe", "sha256": "..." },
+  "launcher": { "version": "1.4.3.0", "url": ".../WotModLauncher.exe", "sha256": "..." },
   "mods": [
-    { "id": "ua.server_online_autoconnect", "title": "Smart Server",
-      "version": "1.1.2", "file": "ua.server_online_autoconnect_1.1.2.wotmod",
-      "subdir": "", "url": ".../ua.server_online_autoconnect_1.1.2.wotmod",
+    { "id": "server_online", "title": "Smart Server",
+      "version": "1.1.3", "file": "ua.server_online_autoconnect_1.1.3.wotmod",
+      "subdir": "", "url": ".../ua.server_online_autoconnect_1.1.3.wotmod",
       "sha256": "...", "size": 22265, "changes": "короткий опис змін" }
   ]
 }
 ```
+
+Поля `url` і `sha256` обов'язкові: запис без них, з `file`/`subdir` поза текою модів або з некоректним ID лаунчер пропускає.
 
 ## Вихідний код
 
