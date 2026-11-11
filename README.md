@@ -71,7 +71,7 @@
 
 | Файл | Призначення |
 |---|---|
-| `src/WotModLauncher.cs` | лаунчер автооновлення (C# .NET Framework 4.0, WinForms + GDI+, без зовнішніх залежностей, збірка `csc.exe`) |
+| `src/WotModLauncher.cs` | лаунчер автооновлення (C# .NET Framework 4.5+, WinForms + GDI+, без зовнішніх залежностей, збірка `csc.exe`) |
 | `src/Installer.cs` | інсталятор модпаку (вибір модів, бекапи, встановлення лаунчера, вибіркове видалення) |
 | `src/publish_release.py` | генерація `manifest.json` та папки ассетів `build/release_assets/` для нового релізу |
 
