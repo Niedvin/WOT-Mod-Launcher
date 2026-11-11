@@ -97,10 +97,10 @@ def _ensure_packaged_file(mod_id, mod_version, member, target, accepted_sha256=N
 
 def _load_focus_probe():
     try:
-        _ensure_packaged_file('ua.background_fps_limiter', '1.0.4', 'res/ua_mod_payloads/background_fps_limiter/_ua_window_focus.pyd', os.path.join(_CONFIG_DIR, '_ua_window_focus.pyd'))
+        _ensure_packaged_file('ua.background_fps_limiter', '1.0.5', 'res/ua_mod_payloads/background_fps_limiter/_ua_window_focus.pyd', os.path.join(_CONFIG_DIR, '_ua_window_focus.pyd'))
         import imp
         probe = imp.load_dynamic('_ua_window_focus', os.path.join(_CONFIG_DIR, '_ua_window_focus.pyd'))
-        LOG_NOTE('[BackgroundFpsLimiter] Native foreground detection loaded version=1.0.4')
+        LOG_NOTE('[BackgroundFpsLimiter] Native foreground detection loaded version=1.0.5')
         return probe
     except Exception:
         LOG_NOTE('[BackgroundFpsLimiter] Native focus probe unavailable; minimize detection only')

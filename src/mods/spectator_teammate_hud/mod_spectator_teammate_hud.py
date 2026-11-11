@@ -1517,7 +1517,7 @@ def init():
 
     try:
         from debug_utils import LOG_NOTE
-        LOG_NOTE('[SpectatorHUD] 1.0.11 initialized')
+        LOG_NOTE('[SpectatorHUD] 1.0.12 initialized')
     except Exception:
         pass
 

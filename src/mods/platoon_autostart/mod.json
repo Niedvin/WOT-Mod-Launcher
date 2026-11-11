@@ -3,10 +3,10 @@
   "dir": "platoon_autostart",
   "id": "platoon_autostart",
   "title": "Squad+",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "author": "Niedvin",
   "description": "Автоматичний старт взводу при готовності всіх бійців, системне сповіщення про старт та модернізований компактний інтерфейс вікна взводу, сумісний з івентовими ангарами.",
-  "changes": "Нова назва: Squad+. Функціонал без змін.",
+  "changes": "Прибрано дублювання підписок після бою, перепідписку після перелогіну, зайві записи конфігу під час перетягування вікна та паралельні повтори «UI зайнятий».",
   "default_checked": true,
   "clean_patterns": [
     "ua.platoon_autostart*.wotmod"
@@ -25,8 +25,8 @@
     "kind": "pyc",
     "source": "mods/configs/platoon_autostart/mod_platoon_autostart.py",
     "entry": "res/scripts/client/gui/mods/mod_platoon_autostart.pyc",
-    "base": "mods/{ver}/ua.platoon_autostart_1.0.3.wotmod",
-    "output": "build/mods/{ver}/ua.platoon_autostart_1.0.3.wotmod",
+    "base": "mods/{ver}/ua.platoon_autostart_1.0.4.wotmod",
+    "output": "build/mods/{ver}/ua.platoon_autostart_1.0.4.wotmod",
     "name": "Squad+",
     "description": "Auto-starts battle when platoon is ready, duplicates Battle button in platoon window, and fixes ready cooldown delay.",
     "extra": [
@@ -48,8 +48,8 @@
   },
   "files": [
     {
-      "source": "build/mods/{ver}/ua.platoon_autostart_1.0.3.wotmod",
-      "target": "game_files/mods/_VERSION_/ua.platoon_autostart_1.0.3.wotmod"
+      "source": "build/mods/{ver}/ua.platoon_autostart_1.0.4.wotmod",
+      "target": "game_files/mods/_VERSION_/ua.platoon_autostart_1.0.4.wotmod"
     },
     {
       "source": "mods/configs/platoon_autostart/config.json",
@@ -63,6 +63,7 @@
   "obsolete": [
     "ua.platoon_autostart_1.0.0.wotmod",
     "ua.platoon_autostart_1.0.1.wotmod",
-    "ua.platoon_autostart_1.0.2.wotmod"
+    "ua.platoon_autostart_1.0.2.wotmod",
+    "ua.platoon_autostart_1.0.3.wotmod"
   ]
 }
