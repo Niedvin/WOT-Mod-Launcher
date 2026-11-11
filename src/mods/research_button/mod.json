@@ -2,6 +2,7 @@
   "folder": "09_Research_Button",
   "dir": "research_button",
   "id": "research_button",
+  "manifest_ids": ["ua.research_button"],
   "title": "Quick Research",
   "version": "1.2.5",
   "author": "Niedvin",

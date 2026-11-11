@@ -2,6 +2,7 @@
   "folder": "08_Background_FPS_Limiter",
   "dir": "background_fps_limiter",
   "id": "background_fps_limiter",
+  "manifest_ids": ["ua.background_fps_limiter"],
   "title": "Background FPS Limiter",
   "version": "1.0.5",
   "author": "Niedvin",

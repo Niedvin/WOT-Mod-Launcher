@@ -2,6 +2,7 @@
   "folder": "11_Appropriate_Locker",
   "dir": "appropriate_locker",
   "id": "appropriate_locker",
+  "manifest_ids": ["ua.appropriate_locker"],
   "title": "Appropriate Locker",
   "version": "1.2.2",
   "author": "Niedvin",

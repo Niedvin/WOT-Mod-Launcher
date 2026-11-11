@@ -2,6 +2,7 @@
   "folder": "07_Spectator_Teammate_HUD",
   "dir": "spectator_teammate_hud",
   "id": "spectator_teammate_hud",
+  "manifest_ids": ["ua.spectator_teammate_hud"],
   "title": "Spectator+",
   "version": "1.0.12",
   "author": "Niedvin",

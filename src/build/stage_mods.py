@@ -93,6 +93,7 @@ def main():
             'description': mod.get('description', ''),
             'changes': mod.get('changes', ''),
             'default_checked': bool(mod.get('default_checked', True)),
+            'manifest_ids': mod.get('manifest_ids', []),
             'clean_patterns': mod.get('clean_patterns', []),
             'clean_res_mods': mod.get('clean_res_mods', []),
             'size_bytes': total_size

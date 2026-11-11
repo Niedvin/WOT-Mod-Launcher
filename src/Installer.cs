@@ -23,8 +23,8 @@ using Microsoft.Win32;
 [assembly: AssemblyCompany("Niedvin")]
 [assembly: AssemblyProduct("WoT Modpack by Niedvin")]
 [assembly: AssemblyCopyright("Copyright © 2026 Niedvin")]
-[assembly: AssemblyFileVersion("1.0.1.1")]
-[assembly: AssemblyVersion("1.0.1.1")]
+[assembly: AssemblyFileVersion("1.0.1.2")]
+[assembly: AssemblyVersion("1.0.1.2")]
 
 namespace WotModpackInstaller
 {
@@ -48,6 +48,7 @@ namespace WotModpackInstaller
     public class ModItem
     {
         public string id { get; set; }
+        public string[] manifest_ids { get; set; }
         public string title { get; set; }
         public string version { get; set; }
         public string author { get; set; }
@@ -2162,6 +2163,45 @@ namespace WotModpackInstaller
             return null;
         }
 
+        internal static List<string> BuildSkipMods(List<ModItem> loadedMods, List<ModItem> selectedMods)
+        {
+            var selectedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (ModItem mod in selectedMods)
+            {
+                if (!string.IsNullOrEmpty(mod.id)) selectedIds.Add(mod.id);
+                if (mod.manifest_ids == null) continue;
+                foreach (string id in mod.manifest_ids)
+                    if (!string.IsNullOrEmpty(id)) selectedIds.Add(id);
+            }
+
+            var skipMods = new List<string>();
+            foreach (ModItem mod in loadedMods)
+            {
+                if (mod.required || string.IsNullOrEmpty(mod.id) || selectedIds.Contains(mod.id)) continue;
+                AddSkipMod(skipMods, mod.id);
+                if (mod.manifest_ids != null)
+                    foreach (string id in mod.manifest_ids)
+                        AddSkipMod(skipMods, id);
+                // unchecked package can span several manifest ids (GPU Boost) — 2026-11-09
+                if (mod.remote_files != null)
+                    foreach (RemoteFile rf in mod.remote_files)
+                        AddSkipMod(skipMods, rf.id);
+                if (mod.updates != null)
+                    foreach (UpdateSource us in mod.updates)
+                        AddSkipMod(skipMods, us.id);
+            }
+            return skipMods;
+        }
+
+        private static void AddSkipMod(List<string> skipMods, string id)
+        {
+            if (string.IsNullOrEmpty(id)) return;
+            foreach (string existing in skipMods)
+                if (string.Equals(existing, id, StringComparison.OrdinalIgnoreCase))
+                    return;
+            skipMods.Add(id);
+        }
+
         private void InstallLauncherAndShortcuts(string gamePath, bool hijackStandard, List<ModItem> selectedMods)
         {
             Log("Лаунчер: пошук WotModLauncher.exe...");
@@ -2186,23 +2226,7 @@ namespace WotModpackInstaller
                 return;
             }
 
-            var selectedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (ModItem mod in selectedMods)
-                if (!string.IsNullOrEmpty(mod.id))
-                    selectedIds.Add(mod.id);
-            var skipMods = new List<string>();
-            foreach (ModItem mod in loadedMods)
-            {
-                if (mod.required || string.IsNullOrEmpty(mod.id) || selectedIds.Contains(mod.id)) continue;
-                skipMods.Add(mod.id);
-                // unchecked package can span several manifest ids (GPU Boost) — 2026-11-09
-                if (mod.remote_files != null)
-                    foreach (RemoteFile rf in mod.remote_files)
-                        if (!string.IsNullOrEmpty(rf.id) && !skipMods.Contains(rf.id)) skipMods.Add(rf.id);
-                if (mod.updates != null)
-                    foreach (UpdateSource us in mod.updates)
-                        if (!string.IsNullOrEmpty(us.id) && !skipMods.Contains(us.id)) skipMods.Add(us.id);
-            }
+            var skipMods = BuildSkipMods(loadedMods, selectedMods);
 
             var ser = new JavaScriptSerializer();
             string cfgJson = ser.Serialize(new Dictionary<string, object>
