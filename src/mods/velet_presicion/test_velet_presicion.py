@@ -118,7 +118,22 @@ class DefaultGunMarkerController(GunMarkerController):
 
 
 class SPGGunMarkerController(GunMarkerController):
-    pass
+    def __init__(self, origin, marker_type=1):
+        GunMarkerController.__init__(self, origin, marker_type)
+        self._dataProvider.relaxTime = 0.1
+        self._dataProvider.setRelaxTime = self._set_relax_time
+        self.updates = []
+        self.disabled = False
+
+    def _set_relax_time(self, value):
+        self._dataProvider.relaxTime = value
+
+    def update(self, markerType, gunMarkerInfo, supportMarkersInfo, relaxTime):
+        self.updates.append(relaxTime)
+        self._updateMatrixProvider(gunMarkerInfo.position, relaxTime)
+
+    def disable(self):
+        self.disabled = True
 
 
 def load_method(archive, file_name, class_name, name, globals_):
@@ -177,8 +192,12 @@ class PrecisionTest(unittest.TestCase):
         self.assertIs(VehicleGunRotator._VehicleGunRotator__onTick.im_func, ORIGINAL)
         self.assertNotIn('_updateMatrixProvider', DefaultGunMarkerController.__dict__)
         self.assertIs(GunMarkerController._updateMatrixProvider.im_func, ORIGINAL_ANIMATION)
+        self.assertIs(SPGGunMarkerController.update.im_func, ORIGINAL_SPG_UPDATE)
+        self.assertIs(SPGGunMarkerController.disable.im_func, ORIGINAL_SPG_DISABLE)
 
     def _write_config(self, text):
+        if MOD is None:
+            return
         MOD.fini()
         with open(MOD._CONFIG_PATH, 'w') as config:
             config.write(text)
@@ -253,6 +272,30 @@ class PrecisionTest(unittest.TestCase):
         self.assertEqual(len(animation.keyframes), 9)
         animation.time = 0.05
         self.assertEqual(animation.translation, Point(5.5, 10.0))
+
+    def test_artillery_marker_drops_the_engine_relax(self):
+        marker = SPGGunMarkerController(Point(5.0, 10.0))
+        info = types.ModuleType('GunMarkerInfo')
+        info.position = Matrix(Point(6.0, 10.0))
+        MOD._state['animation'] = 0.00833
+        try:
+            marker.update(MARKER_TYPES.CLIENT, info, (), 0.00417)
+        finally:
+            MOD._state['animation'] = None
+        self.assertAlmostEqual(marker._dataProvider.relaxTime, 0.00833)
+        marker.disable()
+        self.assertEqual(marker._dataProvider.relaxTime, SETTINGS.SERVER_TICK_LENGTH)
+
+    def test_server_artillery_marker_keeps_the_engine_relax(self):
+        marker = SPGGunMarkerController(Point(5.0, 10.0), MARKER_TYPES.SERVER)
+        info = types.ModuleType('GunMarkerInfo')
+        info.position = Matrix(Point(6.0, 10.0))
+        MOD._state['animation'] = 0.00833
+        try:
+            marker.update(MARKER_TYPES.SERVER, info, (), 0.1)
+        finally:
+            MOD._state['animation'] = None
+        self.assertEqual(marker._dataProvider.relaxTime, 0.1)
 
     def test_server_mode_is_not_accelerated(self):
         rotator = VehicleGunRotator(SIMULATION, client_mode=False)
@@ -336,6 +379,8 @@ if __name__ == '__main__':
         GunMarkerController._updateMatrixProvider = stock_animation
     ORIGINAL = VehicleGunRotator._VehicleGunRotator__onTick.im_func
     ORIGINAL_ANIMATION = GunMarkerController._updateMatrixProvider.im_func
+    ORIGINAL_SPG_UPDATE = SPGGunMarkerController.update.im_func
+    ORIGINAL_SPG_DISABLE = SPGGunMarkerController.disable.im_func
     make_module('VehicleGunRotator', VehicleGunRotator=VehicleGunRotator)
     make_module('AvatarInputHandler')
     make_module('AvatarInputHandler.gun_marker_ctrl', _GunMarkerController=GunMarkerController,

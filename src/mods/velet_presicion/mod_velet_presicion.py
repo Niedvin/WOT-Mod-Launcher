@@ -194,6 +194,32 @@ def _wrap_marker_animation(original):
     return animate
 
 
+def _wrap_spg_update(original):
+    @wraps(original)
+    def update(marker, markerType, gunMarkerInfo, supportMarkersInfo, relaxTime):
+        duration = _state['animation'] or relaxTime
+        provider = marker._dataProvider
+        if (_hooks and duration >= _MIN_ANIMATION
+                and marker._gunMarkerType == GUN_MARKER_TYPE.CLIENT
+                and getattr(provider, 'setRelaxTime', None) is not None):
+            provider.setRelaxTime(duration)
+        return original(marker, markerType, gunMarkerInfo, supportMarkersInfo, relaxTime)
+
+    return update
+
+
+def _wrap_spg_disable(original):
+    @wraps(original)
+    def disable(marker):
+        provider = getattr(marker, '_dataProvider', None)
+        setter = getattr(provider, 'setRelaxTime', None)
+        if setter is not None:
+            setter(SERVER_TICK_LENGTH)
+        return original(marker)
+
+    return disable
+
+
 def init():
     global _config
     if _hooks:
@@ -201,15 +227,19 @@ def init():
     _config = _read_config()
     if not _config['enabled']:
         return
-    from AvatarInputHandler.gun_marker_ctrl import _GunMarkerController
+    from AvatarInputHandler.gun_marker_ctrl import _GunMarkerController, _SPGGunMarkerController
     from VehicleGunRotator import VehicleGunRotator
 
     targets = (
         (VehicleGunRotator, _UPDATE_SERVER, _wrap_server_update),
         (VehicleGunRotator, _ON_TICK, _wrap_local_tick),
         (_GunMarkerController, '_updateMatrixProvider', _wrap_marker_animation),
+        (_SPGGunMarkerController, 'update', _wrap_spg_update),
+        (_SPGGunMarkerController, 'disable', _wrap_spg_disable),
     )
     for owner, name, wrap in targets:
+        if not hasattr(owner, name):
+            continue
         original = getattr(owner, name).im_func
         _hooks.append((owner, name, owner.__dict__.get(name, _MISSING), wrap(original)))
     for owner, name, original, wrapper in _hooks:
