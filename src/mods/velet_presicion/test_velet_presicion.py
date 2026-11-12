@@ -117,6 +117,10 @@ class DefaultGunMarkerController(GunMarkerController):
     pass
 
 
+class SPGGunMarkerController(GunMarkerController):
+    pass
+
+
 def load_method(archive, file_name, class_name, name, globals_):
     module = marshal.loads(archive.read('scripts/client/' + file_name)[8:])
     owner = next(code for code in module.co_consts if isinstance(code, types.CodeType)
@@ -172,6 +176,13 @@ class PrecisionTest(unittest.TestCase):
             MOD.fini()
         self.assertIs(VehicleGunRotator._VehicleGunRotator__onTick.im_func, ORIGINAL)
         self.assertNotIn('_updateMatrixProvider', DefaultGunMarkerController.__dict__)
+        self.assertIs(GunMarkerController._updateMatrixProvider.im_func, ORIGINAL_ANIMATION)
+
+    def _write_config(self, text):
+        MOD.fini()
+        with open(MOD._CONFIG_PATH, 'w') as config:
+            config.write(text)
+        MOD.init()
 
     def test_manual_marker_updates_with_finer_time_steps(self):
         for mode in ('arcade', 'sniper'):
@@ -199,18 +210,49 @@ class PrecisionTest(unittest.TestCase):
         self.assertEqual(len(rotator.local), 6)
         self.assertTrue(all(item[3] == 0.1 for item in rotator.local))
 
-    def test_artillery_uses_vanilla_tick(self):
+    def test_artillery_ticks_with_frames(self):
+        for mode in ('strategic', 'arty'):
+            SIMULATION.__init__()
+            rotator = VehicleGunRotator(SIMULATION, mode=mode)
+            rotator._VehicleGunRotator__onTick()
+            SIMULATION.run(90)
+            self.assertGreaterEqual(len(rotator.local), 80)
+            self.assertLess(max(item[2] for item in rotator.local[1:]), 0.019)
+            server_times = [item[0] for item in rotator.server]
+            self.assertTrue(all(b - a >= 0.1 - 1e-9 for a, b in zip(server_times, server_times[1:])))
+
+    def test_target_lock_ticks_with_frames(self):
+        rotator = VehicleGunRotator(SIMULATION)
+        rotator._avatar.inputHandler.getAimingMode = lambda setting: True
+        rotator._VehicleGunRotator__onTick()
+        SIMULATION.run(90)
+        self.assertGreaterEqual(len(rotator.local), 80)
+        self.assertLess(max(item[2] for item in rotator.local[1:]), 0.019)
+        server_times = [item[0] for item in rotator.server]
+        self.assertTrue(all(b - a >= 0.1 - 1e-9 for a, b in zip(server_times, server_times[1:])))
+
+    def test_artillery_config_keeps_vanilla_tick(self):
+        self._write_config('{"enabled": true, "artillery": false}')
         rotator = VehicleGunRotator(SIMULATION, mode='strategic')
         rotator._VehicleGunRotator__onTick()
         SIMULATION.run(90)
         self.assertEqual(len(rotator.local), 6)
 
-    def test_target_lock_uses_vanilla_tick(self):
+    def test_target_lock_config_keeps_vanilla_tick(self):
+        self._write_config('{"enabled": true, "target_lock": false}')
         rotator = VehicleGunRotator(SIMULATION)
         rotator._avatar.inputHandler.getAimingMode = lambda setting: True
         rotator._VehicleGunRotator__onTick()
         SIMULATION.run(90)
         self.assertEqual(len(rotator.local), 6)
+
+    def test_artillery_marker_is_interpolated(self):
+        marker = SPGGunMarkerController(Point(5.0, 10.0))
+        marker._updateMatrixProvider(Matrix(Point(6.0, 10.0)), 0.1)
+        animation = marker._dataProvider.positionMatrixProvider
+        self.assertEqual(len(animation.keyframes), 9)
+        animation.time = 0.05
+        self.assertEqual(animation.translation, Point(5.5, 10.0))
 
     def test_server_mode_is_not_accelerated(self):
         rotator = VehicleGunRotator(SIMULATION, client_mode=False)
@@ -220,11 +262,11 @@ class PrecisionTest(unittest.TestCase):
         self.assertFalse(rotator.server)
         self.assertAlmostEqual(SIMULATION.pending[0][0], 0.6)
 
-    def test_switching_view_restores_vanilla_timing(self):
+    def test_unsupported_mode_restores_vanilla_timing(self):
         rotator = VehicleGunRotator(SIMULATION)
         rotator._VehicleGunRotator__onTick()
         SIMULATION.run(4)
-        rotator._avatar.inputHandler.ctrlModeName = 'strategic'
+        rotator._avatar.inputHandler.ctrlModeName = 'postmortem'
         SIMULATION.run(30)
         self.assertEqual(rotator.local[-1][3], 0.1)
         server_times = [item[0] for item in rotator.server]
@@ -274,11 +316,7 @@ class PrecisionTest(unittest.TestCase):
             self.assertEqual(len(marker._dataProvider.positionMatrixProvider.keyframes), 2)
 
     def test_disabled_config_keeps_vanilla_behavior(self):
-        if MOD is not None:
-            MOD.fini()
-            with open(MOD._CONFIG_PATH, 'w') as config:
-                config.write('{"enabled": false}')
-            MOD.init()
+        self._write_config('{"enabled": false}')
         rotator = VehicleGunRotator(SIMULATION)
         rotator._VehicleGunRotator__onTick()
         SIMULATION.run(90)
@@ -297,9 +335,12 @@ if __name__ == '__main__':
         stock_animation.func_defaults = (0.0,)
         GunMarkerController._updateMatrixProvider = stock_animation
     ORIGINAL = VehicleGunRotator._VehicleGunRotator__onTick.im_func
+    ORIGINAL_ANIMATION = GunMarkerController._updateMatrixProvider.im_func
     make_module('VehicleGunRotator', VehicleGunRotator=VehicleGunRotator)
     make_module('AvatarInputHandler')
-    make_module('AvatarInputHandler.gun_marker_ctrl', _DefaultGunMarkerController=DefaultGunMarkerController)
+    make_module('AvatarInputHandler.gun_marker_ctrl', _GunMarkerController=GunMarkerController,
+                _DefaultGunMarkerController=DefaultGunMarkerController,
+                _SPGGunMarkerController=SPGGunMarkerController)
     make_module('debug_utils', LOG_NOTE=lambda *args: None, LOG_WARNING=lambda *args: None)
     if len(sys.argv) > 1 and sys.argv[1] != '--vanilla':
         loader = imp.load_compiled if sys.argv[1].endswith('.pyc') else imp.load_source

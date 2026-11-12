@@ -21,6 +21,9 @@ _MIN_TIME_GAP = 0.0005
 _MIN_ANIMATION = 0.002
 _MARKER_SEGMENTS = 8
 _MAX_SPEED_RATIO = 3.0
+_CTRL_MODES = ('arcade', 'sniper')
+_ARTY_MODES = ('strategic', 'arty')
+_DEFAULTS = {'enabled': True, 'artillery': True, 'target_lock': True}
 _ROTATION_TICK = '_VehicleGunRotator__ROTATION_TICK_LENGTH'
 _MIN_TIME_DIFF = '_VehicleGunRotator__INSUFFICIENT_TIME_DIFF'
 _ON_TICK = '_VehicleGunRotator__onTick'
@@ -30,21 +33,27 @@ _SPAN_STATE = '_velet_span'
 _MISSING = object()
 _hooks = []
 _state = {'animation': None}
+_config = dict(_DEFAULTS)
 
 
-def _is_enabled():
+def _read_config():
+    config = dict(_DEFAULTS)
     try:
         with open(_CONFIG_PATH, 'r') as config_file:
-            config = json.load(config_file)
-        if isinstance(config, dict) and isinstance(config.get('enabled'), bool):
-            return config['enabled']
+            data = json.load(config_file)
     except IOError as error:
-        if error.errno == errno.ENOENT:
-            return True
+        if error.errno != errno.ENOENT:
+            LOG_WARNING('[Velet Presicion] Invalid configuration, using defaults')
+        return config
     except ValueError:
-        pass
-    LOG_WARNING('[Velet Presicion] Invalid configuration, using defaults')
-    return True
+        LOG_WARNING('[Velet Presicion] Invalid configuration, using defaults')
+        return config
+    if isinstance(data, dict):
+        for key in _DEFAULTS:
+            value = data.get(key)
+            if isinstance(value, bool):
+                config[key] = value
+    return config
 
 
 def _use_local_tick(rotator):
@@ -53,15 +62,17 @@ def _use_local_tick(rotator):
     avatar = rotator._avatar
     handler = avatar.inputHandler
     descriptor = avatar.vehicleTypeDescriptor
+    if handler is None or descriptor is None:
+        return False
+    mode = handler.ctrlModeName
+    if mode not in _CTRL_MODES and not (_config['artillery'] and mode in _ARTY_MODES):
+        return False
     return (
-        handler is not None
-        and handler.ctrlModeName in ('arcade', 'sniper')
-        and not handler.isObserverFPV
+        not handler.isObserverFPV
         and not avatar.isObserver()
-        and descriptor is not None
         and not descriptor.isHullAimingAvailable
         and rotator._VehicleGunRotator__fixedShotAngles is None
-        and not handler.getAimingMode(AIMING_MODE.TARGET_LOCK)
+        and (_config['target_lock'] or not handler.getAimingMode(AIMING_MODE.TARGET_LOCK))
     )
 
 
@@ -184,15 +195,19 @@ def _wrap_marker_animation(original):
 
 
 def init():
-    if _hooks or not _is_enabled():
+    global _config
+    if _hooks:
         return
-    from AvatarInputHandler.gun_marker_ctrl import _DefaultGunMarkerController
+    _config = _read_config()
+    if not _config['enabled']:
+        return
+    from AvatarInputHandler.gun_marker_ctrl import _GunMarkerController
     from VehicleGunRotator import VehicleGunRotator
 
     targets = (
         (VehicleGunRotator, _UPDATE_SERVER, _wrap_server_update),
         (VehicleGunRotator, _ON_TICK, _wrap_local_tick),
-        (_DefaultGunMarkerController, '_updateMatrixProvider', _wrap_marker_animation),
+        (_GunMarkerController, '_updateMatrixProvider', _wrap_marker_animation),
     )
     for owner, name, wrap in targets:
         original = getattr(owner, name).im_func
