@@ -2,11 +2,12 @@
 from __future__ import absolute_import
 import json
 import os
-import sys
 
 import BigWorld
+from PlayerEvents import g_playerEvents
 from debug_utils import LOG_NOTE, LOG_CURRENT_EXCEPTION
 
+_MOD_VERSION = '1.0.7'
 _CONFIG_DIR = os.path.abspath(os.path.join('mods', 'configs', 'background_fps_limiter'))
 _CONFIG_PATH = os.path.join(_CONFIG_DIR, 'config.json')
 
@@ -52,7 +53,6 @@ def _ensure_packaged_file(mod_id, mod_version, member, target, accepted_sha256=N
         with open(target, 'rb') as stream:
             current = stream.read()
         if current == data:
-            # Game start is the common path: rewrite the sidecar only when it is missing or stale
             if accepted_sha256 is not None and recorded_sha256 != desired_sha256:
                 with open(state_path, 'wb') as stream:
                     stream.write(desired_sha256)
@@ -97,10 +97,10 @@ def _ensure_packaged_file(mod_id, mod_version, member, target, accepted_sha256=N
 
 def _load_focus_probe():
     try:
-        _ensure_packaged_file('ua.background_fps_limiter', '1.0.5', 'res/ua_mod_payloads/background_fps_limiter/_ua_window_focus.pyd', os.path.join(_CONFIG_DIR, '_ua_window_focus.pyd'))
+        _ensure_packaged_file('ua.background_fps_limiter', _MOD_VERSION, 'res/ua_mod_payloads/background_fps_limiter/_ua_window_focus.pyd', os.path.join(_CONFIG_DIR, '_ua_window_focus.pyd'))
         import imp
         probe = imp.load_dynamic('_ua_window_focus', os.path.join(_CONFIG_DIR, '_ua_window_focus.pyd'))
-        LOG_NOTE('[BackgroundFpsLimiter] Native foreground detection loaded version=1.0.5')
+        LOG_NOTE('[BackgroundFpsLimiter] Native foreground detection loaded version=%s' % _MOD_VERSION)
         return probe
     except Exception:
         LOG_NOTE('[BackgroundFpsLimiter] Native focus probe unavailable; minimize detection only')
@@ -154,17 +154,9 @@ def _is_window_focused():
 
 
 def _is_in_battle():
-    try:
-        player = BigWorld.player()
-        if player is None or player.__class__.__name__ != 'PlayerAvatar':
-            return False
-    except Exception:
-        return False
-    try:
-        from gui.battle_control import avatar_getter
-        return bool(avatar_getter.isPlayerOnArena())
-    except Exception:
-        return True
+    from Avatar import PlayerAvatar
+    # isOnArena is false during loading, countdown and post-battle — 2026-11-12
+    return isinstance(BigWorld.player(), PlayerAvatar)
 
 
 def _focused_limit():
@@ -202,18 +194,24 @@ def _update_fps_limit(focused=None):
     active, limit = _target_limit(focused)
     if not active:
         if _applied_limit is not None:
-            # Leaving the cap behind: release once, then stop touching the engine at all — 2026-10-31
             BigWorld.wg_setMaxFrameRate(limit)
             _applied_limit = None
             _last_limit = None
             LOG_NOTE('[BackgroundFpsLimiter] Disabled for this context; cap released once')
         return
-    # Applied every tick: client can drop its own cap back to a stale value between ticks — 2026-10-31
+    # Client can restore a stale cap between ticks — 2026-10-31
     BigWorld.wg_setMaxFrameRate(limit)
     _applied_limit = limit
     if limit != _last_limit:
         _last_limit = limit
         LOG_NOTE('[BackgroundFpsLimiter] Frame rate limit -> %s' % ('off' if limit == 0 else '%d FPS' % limit))
+
+
+def _on_avatar_become_player(*args, **kwargs):
+    try:
+        _update_fps_limit()
+    except Exception:
+        LOG_CURRENT_EXCEPTION()
 
 
 def _cancel_tick():
@@ -316,7 +314,6 @@ def _init_mods_settings(gen):
             'modDisplayName': 'Background FPS Limiter',
             'enabled': bool(_CONFIG.get('enabled', True)),
             'column1': [
-                templates.createCheckbox(text='Увімкнути зниження FPS у фоні', varName='enabled', value=bool(_CONFIG.get('enabled', True))),
                 templates.createSlider(text='FPS у фоновому режимі', varName='target_fps', value=_background_limit(), min=1, max=30, interval=1, format='{{value}} FPS'),
                 templates.createSlider(text='FPS у фокусі', varName='focused_fps', value=_focused_limit(), min=_FOCUSED_FPS_MIN, max=_FOCUSED_FPS_MAX, interval=10, format='{{value}} FPS')
             ],
@@ -359,6 +356,7 @@ def _init_mods_settings(gen):
 def init():
     global _watchdog_id
     _load_config()
+    g_playerEvents.onAvatarBecomePlayer += _on_avatar_become_player
     gen = _generation
     BigWorld.callback(0.1, lambda: _init_mods_settings(gen))
     _schedule_tick(_TICK_INTERVAL)
@@ -371,8 +369,10 @@ def fini():
     _generation += 1
     _cancel_tick()
     _cancel_watchdog()
+    g_playerEvents.onAvatarBecomePlayer -= _on_avatar_become_player
     try:
-        BigWorld.wg_setMaxFrameRate(_focused_limit())
+        if _applied_limit is not None:
+            BigWorld.wg_setMaxFrameRate(_focused_limit())
         _last_limit = None
         _applied_limit = None
     except Exception:

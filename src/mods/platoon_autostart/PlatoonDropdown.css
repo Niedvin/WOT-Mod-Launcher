@@ -1,0 +1,161 @@
+body, #root,
+.App_base_d27ee,
+.App_popoverDecorator_cd5ac,
+.App_content_c0265,
+.PopoverDecorator_base_d0107,
+.PopoverDecorator_decorator_b4f33,
+.PopoverDecorator_content_bc28d,
+.WindowDecorator_container_f5ea4,
+.WindowDecorator_content_fb099 {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: auto !important;
+    height: auto !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+}
+
+.PopoverDecorator_arrow_ef5d0,
+.PopoverDecorator_closeBtn_dbed5,
+.Header_base_d3530,
+.Separator_base_a556f,
+.SettingsContainer_base_dffac,
+.FlatButton_base_fb90a,
+.WindowDecorator_header_c203b,
+.WindowDecorator_closeBtn_d12ef {
+    display: none !important;
+}
+
+.CreatePlatoon_container {
+    width: 240rem !important;
+    height: 76rem !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 6rem !important;
+    background: transparent !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+}
+
+.SoloModeButton_base {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 240rem !important;
+    height: 26rem !important;
+    padding: 0 10rem !important;
+    cursor: pointer !important;
+    border-radius: 3rem !important;
+    user-select: none !important;
+    box-sizing: border-box !important;
+    pointer-events: auto !important;
+}
+
+.SoloModeButton_base__off {
+    background: rgba(22, 26, 34, 0.75) !important;
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4) !important;
+}
+
+.SoloModeButton_base__off:hover {
+    background: rgba(38, 44, 56, 0.9) !important;
+    border-color: rgba(255, 255, 255, 0.45) !important;
+}
+
+.SoloModeButton_base__on {
+    background: rgba(18, 50, 30, 0.85) !important;
+    border: 1px solid rgba(65, 195, 95, 0.65) !important;
+    box-shadow: 0 1px 6px rgba(65, 195, 95, 0.35) !important;
+}
+
+.SoloModeButton_base__on:hover {
+    background: rgba(25, 70, 42, 0.95) !important;
+    border-color: rgba(85, 230, 120, 0.9) !important;
+}
+
+.SoloModeButton_dot {
+    width: 8rem !important;
+    height: 8rem !important;
+    border-radius: 50% !important;
+    margin-right: 8rem !important;
+}
+
+.SoloModeButton_dot__off {
+    background: #777777 !important;
+}
+
+.SoloModeButton_dot__on {
+    background: #41c35f !important;
+    box-shadow: 0 0 6px #41c35f !important;
+}
+
+.SoloModeButton_text {
+    font-size: 13rem !important;
+    font-family: WarHeliosCondCBold, Arial, sans-serif !important;
+    letter-spacing: 0.5px !important;
+    text-transform: uppercase !important;
+}
+
+.SoloModeButton_text__off {
+    color: #999999 !important;
+}
+
+.SoloModeButton_text__on {
+    color: #8ce4a0 !important;
+    text-shadow: 0 0 4px rgba(65, 195, 95, 0.5) !important;
+}
+
+.CreatePlatoon_button {
+    width: 240rem !important;
+    height: 44rem !important;
+    min-height: 44rem !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background: linear-gradient(180deg, #48533e 0%, #303a2d 100%) !important;
+    border: 1rem solid #6e7860 !important;
+    border-radius: 2rem !important;
+    box-shadow: inset 0 1rem 0 rgba(215, 220, 188, 0.15), 0 2rem 5rem rgba(0, 0, 0, 0.4) !important;
+    box-sizing: border-box !important;
+    cursor: pointer !important;
+    user-select: none !important;
+}
+
+.CreatePlatoon_button:hover {
+    border-color: #849174 !important;
+    background: linear-gradient(180deg, #535f47 0%, #3a4637 100%) !important;
+    box-shadow: inset 0 1rem 0 rgba(215, 220, 188, 0.25), 0 2rem 7rem rgba(0, 0, 0, 0.55) !important;
+}
+
+.CreatePlatoon_button:active {
+    background: linear-gradient(180deg, #303a2d 0%, #242c22 100%) !important;
+    box-shadow: inset 0 1rem 2rem rgba(0, 0, 0, 0.6) !important;
+}
+
+.CreatePlatoon_icon {
+    width: 24rem !important;
+    height: 24rem !important;
+    margin-right: 10rem !important;
+    background-image: url('R.images.gui.maps.icons.library.platoon_indicator_gray') !important;
+    background-size: contain !important;
+    background-repeat: no-repeat !important;
+    background-position: center !important;
+    filter: brightness(1.6) !important;
+    pointer-events: none !important;
+}
+
+.CreatePlatoon_text {
+    color: #eee5cd !important;
+    font-size: 15rem !important;
+    font-family: WarHeliosCondCBold, Arial, sans-serif !important;
+    font-weight: 700 !important;
+    text-shadow: 0 1rem 2rem rgba(0, 0, 0, 0.7) !important;
+    letter-spacing: 0.5px !important;
+    text-transform: uppercase !important;
+    pointer-events: none !important;
+}

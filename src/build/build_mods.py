@@ -60,7 +60,7 @@ def create_or_update_wotmod(src_wotmod, dst_wotmod, update_map):
     os.makedirs(os.path.dirname(dst_wotmod), exist_ok=True)
     written = set()
     with zipfile.ZipFile(temporary, 'w', compression=zipfile.ZIP_STORED) as output:
-        if os.path.exists(src_wotmod):
+        if src_wotmod and os.path.exists(src_wotmod):
             with zipfile.ZipFile(src_wotmod, 'r') as source:
                 for item in source.infolist():
                     data = update_map[item.filename] if item.filename in update_map else source.read(item.filename)
@@ -101,10 +101,14 @@ def build_pyc(mod):
     update = {'meta.xml': meta_xml(mod, cfg), cfg['entry']: open(compiled, 'rb').read()}
     for extra in cfg.get('extra', []):
         extra_source = path_for(extra['source'])
-        if os.path.exists(extra_source):
-            update[extra['entry']] = open(extra_source, 'rb').read()
+        with open(extra_source, 'rb') as handle:
+            update[extra['entry']] = handle.read()
     output = path_for(cfg['output'])
-    create_or_update_wotmod(path_for(cfg['base']), output, update)
+    base = path_for(cfg['base']) if cfg.get('base') else None
+    create_or_update_wotmod(base, output, update)
+    if run_tests:
+        for command in expand(cfg.get('test_commands', [])):
+            run_command(command)
     return [output]
 
 

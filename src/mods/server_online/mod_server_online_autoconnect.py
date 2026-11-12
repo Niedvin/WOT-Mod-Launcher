@@ -118,7 +118,6 @@ def _init_mods_settings():
             'modDisplayName': 'Smart Server',
             'enabled': bool(_CONFIG.get('enabled', True)),
             'column1': [
-                templates.createCheckbox(text='Увімкнути мод', varName='enabled', value=bool(_CONFIG.get('enabled', True))),
                 templates.createCheckbox(text='Автопідключення до макс. онлайну', varName='auto_connect_max_online', value=bool(_CONFIG.get('auto_connect_max_online', True))),
                 templates.createCheckbox(text='Показувати онлайн у списку', varName='show_online_in_dropdown', value=bool(_CONFIG.get('show_online_in_dropdown', True))),
                 templates.createCheckbox(text='Авто-релоґін після бою', varName='post_battle_relogin_enabled', value=bool(_CONFIG.get('post_battle_relogin_enabled', True)))
@@ -202,7 +201,6 @@ def _extract_online_data(raw_json):
 
 
 def _fetch_worker(url):
-    # Runs off the main thread: it only stores the result, the main thread picks it up in _poll_fetch
     global _FETCH_RESULT
     data = None
     try:
@@ -238,7 +236,7 @@ def _cancel_fetch_poll():
 
 
 def _poll_fetch():
-    # BigWorld.callback is not safe to call from a worker thread, so the result is collected here — 2026-11-05
+    # BigWorld.callback requires the main thread — 2026-11-05
     global _FETCH_POLL_ID, _FETCH_RESULT, _IS_FETCHING
     _FETCH_POLL_ID = None
     result = _FETCH_RESULT

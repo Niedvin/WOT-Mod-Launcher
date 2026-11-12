@@ -155,7 +155,6 @@ def _run_deferred_save():
 
 
 def _save_config_later():
-    # Window drags call move() for every mouse step; write the final position once instead of per step
     global _SAVE_CONFIG_TIMER_ID
     _cancel_deferred_save()
     try:
@@ -194,7 +193,6 @@ def _init_mods_settings():
             'modDisplayName': 'Squad+',
             'enabled': bool(_CONFIG.get('enabled', True)),
             'column1': [
-                templates.createCheckbox(text='Увімкнути мод взводу', varName='enabled', value=bool(_CONFIG.get('enabled', True))),
                 templates.createCheckbox(text='Автоматичний старт у бій', varName='auto_start_enabled', value=bool(_CONFIG.get('auto_start_enabled', True))),
                 templates.createCheckbox(text='Системне сповіщення про старт', varName='show_system_message', value=bool(_CONFIG.get('show_system_message', True)))
             ],
@@ -771,7 +769,7 @@ def _is_in_hangar():
         if sub_alias is None and hasattr(sub_view, 'key'):
             sub_alias = getattr(sub_view.key, 'alias', None)
 
-        # event hangars use non-standard aliases e.g. HalloweenHangar — 2026-10-15
+        # Event hangars can use aliases like HalloweenHangar — 2026-10-15
         if 'hangar' not in str(sub_alias or '').lower():
             _hangar_debug('alias=%s' % sub_alias)
             return False
@@ -1009,12 +1007,11 @@ def _update_visibility():
                 platoonCtrl.destroyUI(hideOnly=True)
             return
 
-        # event promo windows at login block first checks → retry — 2026-10-15
+        # Event promos can block hangar setup after login — 2026-10-15
         busy = _hangar_ui_busy_reason()
         if busy and _UI_FREE_RETRIES < 5:
             _UI_FREE_RETRIES += 1
             LOG_NOTE('[PlatoonAutoStart] Hangar UI busy (%s), auto-show retry %d' % (busy, _UI_FREE_RETRIES))
-            # Shares the debounced timer so view events cannot start parallel retry chains
             _schedule_visibility_check(1.0)
             return
         if busy:
@@ -1171,7 +1168,6 @@ def _deref(ref):
 
 
 def _make_ref(obj):
-    # The reference is taken before subscribing, so a failure here can never leave a handler registered twice
     try:
         return weakref.ref(obj)
     except TypeError:
@@ -1179,7 +1175,7 @@ def _make_ref(obj):
 
 
 def _try_subscribe_lsm():
-    # Tracks the instance, not a flag: a relogin can bring a new state machine that also needs the handler
+    # Relogin can replace the lobby state machine — 2026-11-12
     global _LSM_REF
     try:
         from gui.Scaleform.lobby_entry import getLobbyStateMachine
@@ -1208,7 +1204,7 @@ def _unsubscribe_lsm():
 
 
 def _subscribe_members_update():
-    # onAccountShowGUI fires after every battle; subscribing each time would stack handlers
+    # onAccountShowGUI fires after every battle — 2026-11-12
     global _MEMBERS_CTRL_REF
     try:
         from helpers import dependency

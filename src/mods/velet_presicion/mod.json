@@ -1,0 +1,50 @@
+{
+  "folder": "12_Velet_Presicion",
+  "dir": "velet_presicion",
+  "id": "ua.velet_presicion",
+  "title": "Velet Presicion",
+  "version": "1.0.1",
+  "author": "Niedvin",
+  "description": "Згладжує рух маркера гармати і оновлює його кожен кадр замість 10 разів на секунду під час ручного наведення в аркадному та снайперському режимах.",
+  "changes": "Маркер оновлюється до 120 Гц з інтерполяцією швидкості між кадрами: рух прицілу більше не смикається, а стрибки глибини згладжуються в екранному просторі.",
+  "default_checked": true,
+  "clean_patterns": [
+    "ua.velet_presicion*.wotmod"
+  ],
+  "clean_res_mods": [],
+  "readme_features": [
+    "Маркер гармати оновлюється кожен кадр (ціль — 120 Гц) замість рідних 10 Гц.",
+    "Інтерполяція з перенесенням швидкості між кадрами прибирає смикання при русі прицілу.",
+    "Стрибки глибини цілі згладжуються в екранному просторі, без стрибків маркера по екрану.",
+    "Серверні пакети наведення лишаються на рідних 10 Гц; артилерія, реплеї та автозахоплення — без змін."
+  ],
+  "build": {
+    "kind": "pyc",
+    "source": "src/mods/velet_presicion/mod_velet_presicion.py",
+    "entry": "res/scripts/client/gui/mods/mod_velet_presicion.pyc",
+    "output": "build/mods/{ver}/ua.velet_presicion_1.0.1.wotmod",
+    "name": "Velet Presicion",
+    "description": "Smooths local gun marker movement and updates it every frame during manual aim.",
+    "extra": [],
+    "test_commands": [
+      [
+        "py27",
+        "src/mods/velet_presicion/test_velet_presicion.py",
+        "src/mods/velet_presicion/mod_velet_presicion.py"
+      ]
+    ]
+  },
+  "files": [
+    {
+      "source": "build/mods/{ver}/ua.velet_presicion_1.0.1.wotmod",
+      "target": "game_files/mods/_VERSION_/ua.velet_presicion_1.0.1.wotmod"
+    },
+    {
+      "source": "src/mods/velet_presicion/config.json",
+      "target": "game_files/mods/configs/velet_presicion/config.json"
+    }
+  ],
+  "obsolete": [
+    "ua.velet_presicion_1.0.0.wotmod"
+  ]
+}

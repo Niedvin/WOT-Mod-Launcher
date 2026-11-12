@@ -35,6 +35,10 @@
     "src/mods/platoon_autostart/MembersWindow.css": "scratch/platoon_ui_edit/MembersWindow.css",
     "src/mods/platoon_autostart/MembersWindow.js": "scratch/platoon_ui_edit/MembersWindow.js",
     "src/mods/openwg_gpu/gpu.json": "scratch/openwg_gpu_cfg/gpu.json",
-    "src/mods/openwg_gpu/upscaler.json": "scratch/openwg_gpu_cfg/upscaler.json"
+    "src/mods/openwg_gpu/upscaler.json": "scratch/openwg_gpu_cfg/upscaler.json",
+    "src/mods/velet_presicion/mod_velet_presicion.py": "scratch/velet_presicion/mod_velet_presicion.py",
+    "src/mods/velet_presicion/test_velet_presicion.py": "scratch/velet_presicion/test_velet_presicion.py",
+    "src/mods/velet_presicion/README.md": "scratch/velet_presicion/README.md",
+    "src/mods/velet_presicion/config.json": "mods/configs/velet_presicion/config.json"
   }
 }

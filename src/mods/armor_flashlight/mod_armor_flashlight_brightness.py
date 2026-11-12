@@ -77,13 +77,12 @@ def _init_mods_settings():
             'modDisplayName': 'Velet Penetration',
             'enabled': bool(_CONFIG.get('enabled', True)),
             'column1': [
-                templates.createCheckbox(text='Увімкнути підсвітку ліхтарика', varName='enabled', value=bool(_CONFIG.get('enabled', True))),
-                templates.createSlider(text='Яскравість зеленої зони', varName='green_brightness', value=int(float(_CONFIG.get('green_brightness_multiplier', 1.50)) * 100), min=50, max=300, interval=10, format='{{value}}%'),
-                templates.createSlider(text='Яскравість жовтої зони', varName='yellow_brightness', value=int(float(_CONFIG.get('yellow_brightness_multiplier', 1.10)) * 100), min=50, max=300, interval=10, format='{{value}}%')
+                templates.createSlider(text='Яскравість зеленої зони', varName='green_brightness', value=int(round(float(_CONFIG.get('green_brightness_multiplier', 1.50)) * 100)), min=50, max=300, interval=10, format='{{value}}%'),
+                templates.createSlider(text='Яскравість жовтої зони', varName='yellow_brightness', value=int(round(float(_CONFIG.get('yellow_brightness_multiplier', 1.10)) * 100)), min=50, max=300, interval=10, format='{{value}}%')
             ],
             'column2': [
-                templates.createSlider(text='Яскравість червоної зони', varName='red_brightness', value=int(float(_CONFIG.get('red_brightness_multiplier', 1.00)) * 100), min=50, max=200, interval=10, format='{{value}}%'),
-                templates.createSlider(text='Радіус ліхтарика', varName='radius_mult', value=int(float(_CONFIG.get('radius_multiplier', 1.50)) * 100), min=50, max=300, interval=10, format='{{value}}%')
+                templates.createSlider(text='Яскравість червоної зони', varName='red_brightness', value=int(round(float(_CONFIG.get('red_brightness_multiplier', 1.00)) * 100)), min=50, max=200, interval=10, format='{{value}}%'),
+                templates.createSlider(text='Радіус ліхтарика', varName='radius_mult', value=int(round(float(_CONFIG.get('radius_multiplier', 1.50)) * 100)), min=50, max=300, interval=10, format='{{value}}%')
             ]
         }
         saved = g_modsSettingsApi.setModTemplate('ua.armor_flashlight_brightness', template, _on_settings_changed)

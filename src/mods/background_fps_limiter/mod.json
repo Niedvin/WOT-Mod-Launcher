@@ -4,10 +4,10 @@
   "id": "background_fps_limiter",
   "manifest_ids": ["ua.background_fps_limiter"],
   "title": "Background FPS Limiter",
-  "version": "1.0.5",
+  "version": "1.0.7",
   "author": "Niedvin",
   "description": "Обмежує частоту кадрів (за замовчуванням 5 FPS), коли вікно гри не в фокусі (alt-tab або згортання), щоб зменшити навантаження на процесор і відеокарту; окремі перемикачі для ангару та бою.",
-  "changes": "Некоректне значення FPS у конфігу більше не ламає сторінку налаштувань, а файл-хеш payload не переписується на кожному старті гри.",
+  "changes": "Перемикач FPS у бою діє від початку завантаження до повернення в ангар.",
   "default_checked": true,
   "clean_patterns": [
     "ua.background_fps_limiter*.wotmod"
@@ -30,14 +30,14 @@
     ],
     "outputs": [
       {
-        "to": "build/mods/{ver}/ua.background_fps_limiter_1.0.5.wotmod"
+        "to": "build/mods/{ver}/ua.background_fps_limiter_1.0.7.wotmod"
       }
     ]
   },
   "files": [
     {
-      "source": "build/mods/{ver}/ua.background_fps_limiter_1.0.5.wotmod",
-      "target": "game_files/mods/_VERSION_/ua.background_fps_limiter_1.0.5.wotmod"
+      "source": "build/mods/{ver}/ua.background_fps_limiter_1.0.7.wotmod",
+      "target": "game_files/mods/_VERSION_/ua.background_fps_limiter_1.0.7.wotmod"
     },
     {
       "source": "mods/configs/background_fps_limiter/config.json",
@@ -57,6 +57,8 @@
     "ua.background_fps_limiter_1.0.1.wotmod",
     "ua.background_fps_limiter_1.0.2.wotmod",
     "ua.background_fps_limiter_1.0.3.wotmod",
-    "ua.background_fps_limiter_1.0.4.wotmod"
+    "ua.background_fps_limiter_1.0.4.wotmod",
+    "ua.background_fps_limiter_1.0.5.wotmod",
+    "ua.background_fps_limiter_1.0.6.wotmod"
   ]
 }

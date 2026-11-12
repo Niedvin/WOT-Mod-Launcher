@@ -83,7 +83,7 @@
 
 ## Development
 
-Source for all 7 Niedvin mods, native focus helper, build scripts and research artwork is included under `src/mods/` and `src/build/`. See [build instructions](docs/BUILD.md) and [research design validation](docs/research-button-design-qa.md).
+Source for all 8 Niedvin mods, native focus helper, build scripts and research artwork is included under `src/mods/` and `src/build/`. See [build instructions](docs/BUILD.md) and [research design validation](docs/research-button-design-qa.md).
 
 ## Додавання нового мода
 
