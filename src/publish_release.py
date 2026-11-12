@@ -127,7 +127,9 @@ def local_test(game_ver, bump, out_dir):
             "sha256": sha256_file(full_path),
             "size": os.path.getsize(full_path),
             "changes": info.get("changes") or info.get("description", ""),
-            "default_checked": bool(info.get("default_checked", True))
+            "default_checked": bool(info.get("default_checked", True)),
+            "possible_cheat": bool(info.get("possible_cheat", False)),
+            "possible_cheat_note": info.get("possible_cheat_note", "")
         })
 
     for full_path, fname, rel_sub, info in iter_remote_payloads():
@@ -145,7 +147,9 @@ def local_test(game_ver, bump, out_dir):
             "sha256": sha256_file(full_path),
             "size": os.path.getsize(full_path),
             "changes": info.get("changes") or info.get("description", ""),
-            "default_checked": bool(info.get("default_checked", True))
+            "default_checked": bool(info.get("default_checked", True)),
+            "possible_cheat": bool(info.get("possible_cheat", False)),
+            "possible_cheat_note": info.get("possible_cheat_note", "")
         })
 
     manifest = {
@@ -219,7 +223,9 @@ def main():
             "sha256": sha256_file(full_path),
             "size": os.path.getsize(full_path),
             "changes": changes,
-            "default_checked": bool(info.get("default_checked", True))
+            "default_checked": bool(info.get("default_checked", True)),
+            "possible_cheat": bool(info.get("possible_cheat", False)),
+            "possible_cheat_note": info.get("possible_cheat_note", "")
         })
 
     for full_path, fname, rel_sub, info in iter_remote_payloads():
@@ -235,7 +241,9 @@ def main():
             "sha256": sha256_file(full_path),
             "size": os.path.getsize(full_path),
             "changes": info.get("changes") or info.get("description", ""),
-            "default_checked": bool(info.get("default_checked", True))
+            "default_checked": bool(info.get("default_checked", True)),
+            "possible_cheat": bool(info.get("possible_cheat", False)),
+            "possible_cheat_note": info.get("possible_cheat_note", "")
         })
 
     manifest = {

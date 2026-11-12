@@ -23,8 +23,8 @@ using Microsoft.Win32;
 [assembly: AssemblyCompany("Niedvin")]
 [assembly: AssemblyProduct("WoT Modpack by Niedvin")]
 [assembly: AssemblyCopyright("Copyright © 2026 Niedvin")]
-[assembly: AssemblyFileVersion("1.0.1.2")]
-[assembly: AssemblyVersion("1.0.1.2")]
+[assembly: AssemblyFileVersion("1.0.1.4")]
+[assembly: AssemblyVersion("1.0.1.4")]
 
 namespace WotModpackInstaller
 {
@@ -54,6 +54,8 @@ namespace WotModpackInstaller
         public string author { get; set; }
         public string description { get; set; }
         public bool default_checked { get; set; }
+        public bool possible_cheat { get; set; }
+        public string possible_cheat_note { get; set; }
         public bool required { get; set; }
         public object[] clean_patterns { get; set; }
         public object[] clean_res_mods { get; set; }
@@ -76,7 +78,8 @@ namespace WotModpackInstaller
             else
                 sizeStr = string.Format("{0} KB", Math.Max(1, size_bytes / 1024));
 
-            return string.Format("{0} v{1} ({2}{3})", title, version, sizeStr, NeedsDownload ? ", з мережі" : "");
+            string marker = possible_cheat ? "[!] " : "";
+            return string.Format("{0}{1} v{2} ({3}{4})", marker, title, version, sizeStr, NeedsDownload ? ", з мережі" : "");
         }
     }
 
@@ -405,6 +408,8 @@ namespace WotModpackInstaller
         private Label lblModDetailsTitle;
         private Label lblModDetailsMeta;
         private TextBox txtModDescription;
+        private ToolTip modToolTip;
+        private int modTipIndex = -1;
 
         private SectionPanel grpOptions;
         private CheckBox chkCleanOld;
@@ -546,11 +551,18 @@ namespace WotModpackInstaller
             lblModCounter.Font = new Font("Segoe UI", 9F, FontStyle.Bold, GraphicsUnit.Point);
             lblModCounter.Text = "Вибрано: 0 з 0";
 
+            modToolTip = new ToolTip();
+            modToolTip.InitialDelay = 350;
+            modToolTip.ReshowDelay = 100;
+            modToolTip.AutoPopDelay = 12000;
+
             chkListMods = new CheckedListBox();
             chkListMods.Location = new Point(14, 32);
             chkListMods.Size = new Size(470, 156);
             chkListMods.CheckOnClick = true;
             chkListMods.BorderStyle = BorderStyle.FixedSingle;
+            chkListMods.MouseMove += ChkListMods_MouseMove;
+            chkListMods.MouseLeave += (s, e) => { modToolTip.Hide(chkListMods); modTipIndex = -1; };
             chkListMods.SelectedIndexChanged += ChkListMods_SelectedIndexChanged;
             chkListMods.ItemCheck += (s, e) => { if (IsHandleCreated) BeginInvoke(new Action(UpdateModCounter)); };
 
@@ -1045,6 +1057,20 @@ namespace WotModpackInstaller
                     : string.Format("Версія: {0}  |  Автор: {1}", item.version, item.author);
                 txtModDescription.Text = item.description;
             }
+        }
+
+        private void ChkListMods_MouseMove(object sender, MouseEventArgs e)
+        {
+            int index = chkListMods.IndexFromPoint(e.Location);
+            if (index == modTipIndex) return;
+            modTipIndex = index;
+            ModItem item = index >= 0 ? chkListMods.Items[index] as ModItem : null;
+            if (item != null && item.possible_cheat)
+                modToolTip.SetToolTip(chkListMods, string.IsNullOrEmpty(item.possible_cheat_note)
+                    ? "Може детектуватися як чіт. Використовуйте на власний розсуд."
+                    : item.possible_cheat_note);
+            else
+                modToolTip.SetToolTip(chkListMods, "");
         }
 
         private void AutoDetectGame()

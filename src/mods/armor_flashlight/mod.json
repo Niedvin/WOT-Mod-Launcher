@@ -8,6 +8,8 @@
   "description": "Налаштування яскравості та радіуса підсвічування коліматора/ліхтарика зон пробиття броні (зелений 1.5x, жовтий 1.1x, збільшений радіус 1.5x).",
   "changes": "Нова назва: Velet Penetration. Функціонал без змін.",
   "default_checked": false,
+  "possible_cheat": true,
+  "possible_cheat_note": "Може детектуватися як чіт. Використовуйте на власний розсуд.",
   "clean_patterns": [
     "ua.armor_flashlight_brightness*.wotmod"
   ],

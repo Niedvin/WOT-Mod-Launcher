@@ -23,8 +23,8 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("Niedvin")]
 [assembly: AssemblyProduct("WoT Modpack by Niedvin")]
 [assembly: AssemblyCopyright("Copyright © 2026 Niedvin")]
-[assembly: AssemblyFileVersion("1.4.3.2")]
-[assembly: AssemblyVersion("1.4.3.2")]
+[assembly: AssemblyFileVersion("1.4.3.4")]
+[assembly: AssemblyVersion("1.4.3.4")]
 
 namespace WotModLauncher
 {
@@ -99,6 +99,8 @@ namespace WotModLauncher
         public long size { get; set; }
         public string changes { get; set; }
         public bool? default_checked { get; set; }
+        public bool possible_cheat { get; set; }
+        public string possible_cheat_note { get; set; }
     }
 
     public class ManifestRoot
@@ -1592,25 +1594,42 @@ namespace WotModLauncher
             return button;
         }
 
+        private static string ModRowTitle(ManifestModEntry remote)
+        {
+            string title = remote.title ?? remote.id;
+            return remote.possible_cheat ? "[!] " + title : title;
+        }
+
+        private static string ModRowTooltip(ManifestModEntry remote, string changes)
+        {
+            if (!remote.possible_cheat) return changes;
+            string note = string.IsNullOrEmpty(remote.possible_cheat_note)
+                ? "Може детектуватися як чіт. Використовуйте на власний розсуд."
+                : remote.possible_cheat_note;
+            return string.IsNullOrEmpty(changes) ? note : note + "\n\n" + changes;
+        }
+
         private void LoadItems()
         {
             isLoading = true;
             foreach (PendingModUpdate item in updateItems)
             {
-                ListViewItem row = new ListViewItem(item.Remote.title ?? item.Remote.id);
+                string changes = item.Remote.changes ?? "Оновлення сумісності та покращення стабільності";
+                ListViewItem row = new ListViewItem(ModRowTitle(item.Remote));
                 row.SubItems.Add(string.Format("{0} → {1}", item.InstalledVersion ?? "?", item.Remote.version));
-                row.SubItems.Add(item.Remote.changes ?? "Оновлення сумісності та покращення стабільності");
-                row.ToolTipText = item.Remote.changes ?? "";
+                row.SubItems.Add(changes);
+                row.ToolTipText = ModRowTooltip(item.Remote, changes);
                 row.Tag = item;
                 row.Checked = true;
                 listUpdates.Items.Add(row);
             }
             foreach (PendingModUpdate item in newItems)
             {
-                ListViewItem row = new ListViewItem(item.Remote.title ?? item.Remote.id);
+                string changes = item.Remote.changes ?? "";
+                ListViewItem row = new ListViewItem(ModRowTitle(item.Remote));
                 row.SubItems.Add("новий • " + item.Remote.version);
-                row.SubItems.Add(item.Remote.changes ?? "");
-                row.ToolTipText = item.Remote.changes ?? "";
+                row.SubItems.Add(changes);
+                row.ToolTipText = ModRowTooltip(item.Remote, changes);
                 row.Tag = item;
                 row.Checked = false;
                 listNew.Items.Add(row);

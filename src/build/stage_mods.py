@@ -93,6 +93,8 @@ def main():
             'description': mod.get('description', ''),
             'changes': mod.get('changes', ''),
             'default_checked': bool(mod.get('default_checked', True)),
+            'possible_cheat': bool(mod.get('possible_cheat', False)),
+            'possible_cheat_note': mod.get('possible_cheat_note', ''),
             'manifest_ids': mod.get('manifest_ids', []),
             'clean_patterns': mod.get('clean_patterns', []),
             'clean_res_mods': mod.get('clean_res_mods', []),
