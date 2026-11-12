@@ -126,7 +126,10 @@ def local_test(game_ver, bump, out_dir):
             "url": os.path.abspath(os.path.join(out_dir, fname)),
             "sha256": sha256_file(full_path),
             "size": os.path.getsize(full_path),
-            "changes": info.get("changes") or info.get("description", ""),
+            "description": info.get("description", ""),
+            "author": info.get("author", ""),
+            "summary": info.get("summary", ""),
+            "changes": info.get("changes", ""),
             "default_checked": bool(info.get("default_checked", True)),
             "possible_cheat": bool(info.get("possible_cheat", False)),
             "possible_cheat_note": info.get("possible_cheat_note", "")
@@ -146,7 +149,10 @@ def local_test(game_ver, bump, out_dir):
             "url": os.path.abspath(os.path.join(out_dir, fname)),
             "sha256": sha256_file(full_path),
             "size": os.path.getsize(full_path),
-            "changes": info.get("changes") or info.get("description", ""),
+            "description": info.get("description", ""),
+            "author": info.get("author", ""),
+            "summary": info.get("summary", ""),
+            "changes": info.get("changes", ""),
             "default_checked": bool(info.get("default_checked", True)),
             "possible_cheat": bool(info.get("possible_cheat", False)),
             "possible_cheat_note": info.get("possible_cheat_note", "")
@@ -210,7 +216,7 @@ def main():
     for full_path, fname, rel_sub, info in iter_staged_wotmods():
         w_id, w_ver = parse_wotmod_meta(full_path, fname)
         title = info["title"] if not rel_sub else f"{info['title']} ({w_id})"
-        changes = info.get("changes") or info.get("description", "")
+        changes = info.get("changes", "")
 
         shutil.copy2(full_path, os.path.join(assets_dir, fname))
         mods_entries.append({
@@ -222,6 +228,9 @@ def main():
             "url": f"{REPO_BASE_URL}/{fname}",
             "sha256": sha256_file(full_path),
             "size": os.path.getsize(full_path),
+            "description": info.get("description", ""),
+            "author": info.get("author", ""),
+            "summary": info.get("summary", ""),
             "changes": changes,
             "default_checked": bool(info.get("default_checked", True)),
             "possible_cheat": bool(info.get("possible_cheat", False)),
@@ -240,7 +249,10 @@ def main():
             "url": f"{REPO_BASE_URL}/{fname}",
             "sha256": sha256_file(full_path),
             "size": os.path.getsize(full_path),
-            "changes": info.get("changes") or info.get("description", ""),
+            "description": info.get("description", ""),
+            "author": info.get("author", ""),
+            "summary": info.get("summary", ""),
+            "changes": info.get("changes", ""),
             "default_checked": bool(info.get("default_checked", True)),
             "possible_cheat": bool(info.get("possible_cheat", False)),
             "possible_cheat_note": info.get("possible_cheat_note", "")

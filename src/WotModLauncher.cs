@@ -23,8 +23,9 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("Niedvin")]
 [assembly: AssemblyProduct("WoT Modpack by Niedvin")]
 [assembly: AssemblyCopyright("Copyright © 2026 Niedvin")]
-[assembly: AssemblyFileVersion("1.4.3.4")]
-[assembly: AssemblyVersion("1.4.3.4")]
+[assembly: AssemblyFileVersion("1.4.4.0")]
+[assembly: AssemblyVersion("1.4.4.0")]
+[assembly: AssemblyMetadata("LucideIconLicense", "ISC License\n\nCopyright (c) 2026 Lucide Icons and Contributors\n\nPermission to use, copy, modify, and/or distribute this software for any\npurpose with or without fee is hereby granted, provided that the above\ncopyright notice and this permission notice appear in all copies.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\" AND THE AUTHOR DISCLAIMS ALL WARRANTIES\nWITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF\nMERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR\nANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES\nWHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN\nACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF\nOR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.")]
 
 namespace WotModLauncher
 {
@@ -98,6 +99,9 @@ namespace WotModLauncher
         public string sha256 { get; set; }
         public long size { get; set; }
         public string changes { get; set; }
+        public string description { get; set; }
+        public string summary { get; set; }
+        public string author { get; set; }
         public bool? default_checked { get; set; }
         public bool possible_cheat { get; set; }
         public string possible_cheat_note { get; set; }
@@ -155,7 +159,7 @@ namespace WotModLauncher
             }
         }
 
-        public static void AddDeclinedMods(List<string> ids)
+        public static bool AddDeclinedMods(List<string> ids)
         {
             List<string> current = LoadDeclinedMods();
             foreach (string id in ids)
@@ -175,10 +179,13 @@ namespace WotModLauncher
             try
             {
                 var serializer = new JavaScriptSerializer();
+                Directory.CreateDirectory(LauncherDir);
                 File.WriteAllText(DeclinedModsPath, serializer.Serialize(current), new UTF8Encoding(false));
+                return true;
             }
             catch
             {
+                return false;
             }
         }
 
@@ -980,10 +987,8 @@ namespace WotModLauncher
 
                 if (foundFile == null)
                 {
-                    // Without an explicit installer selection, only default-checked mods are auto-added
                     if (skipMods == null && entry.default_checked == false)
                         continue;
-                    // Mods present on GitHub but missing locally are installed on the next launch
                     result.Add(new PendingModUpdate
                     {
                         Remote = entry,
@@ -1262,35 +1267,42 @@ namespace WotModLauncher
     public class UpdateDialogForm : Form
     {
         private readonly string gamePath;
-        private readonly string gameVer;
         private readonly SelfUpdateState launcherUpdate;
         private readonly List<PendingModUpdate> updateItems = new List<PendingModUpdate>();
         private readonly List<PendingModUpdate> newItems = new List<PendingModUpdate>();
-
-        private readonly Label lblTitle;
-        private readonly Label lblSubtitle;
+        private readonly Dictionary<PendingModUpdate, ModUpdateRow> rows = new Dictionary<PendingModUpdate, ModUpdateRow>();
         private readonly CheckBox chkLauncher;
-        private readonly Label lblLauncher;
         private readonly Label lblUpdatesHeader;
         private readonly Label lblNewHeader;
-        private readonly ListView listUpdates;
-        private readonly ListView listNew;
-        private readonly Label lblUpdatesEmpty;
-        private readonly Label lblNewEmpty;
+        private readonly TableLayoutPanel modStack;
+        private readonly Panel modScroll;
+        private readonly Label lblEmpty;
+        private readonly Label lblDetailsTitle;
+        private readonly Label lblDetailsMeta;
+        private readonly Label lblChanges;
+        private readonly Label lblDescription;
+        private readonly Label lblWarning;
         private readonly Button btnUpdate;
         private readonly Button btnSkip;
-        private readonly Button btnNoMods;
-        private readonly Button btnDecline;
+        private readonly Button btnOther;
         private readonly Button btnSelectAll;
         private readonly Button btnSelectNone;
+        private readonly ContextMenuStrip otherMenu;
+        private readonly ToolTip toolTip = new ToolTip();
         private readonly ProgressBar progress;
         private readonly Label lblStatus;
+        private readonly TableLayoutPanel footer;
+        private PendingModUpdate selectedItem;
 
-        private readonly Font fontBase = new Font("Segoe UI", 9f);
-        private readonly Font fontTitle = new Font("Segoe UI", 14f, FontStyle.Bold);
-        private readonly Font fontHeader = new Font("Segoe UI", 9f, FontStyle.Bold);
-        private readonly Font fontButton = new Font("Segoe UI", 9.5f, FontStyle.Bold);
-
+        private readonly Font fontBase = new Font("Segoe UI", 14f);
+        private readonly Font fontTitle = new Font("Segoe UI", 23f, FontStyle.Bold);
+        private readonly Font fontHeader = new Font("Segoe UI", 17f, FontStyle.Bold);
+        private readonly Font fontReading = new Font("Segoe UI", 16f);
+        private readonly Panel reading;
+        private readonly Font fontButton = new Font("Segoe UI", 12f, FontStyle.Bold);
+        private readonly Image declineIcon = LoadIcon("iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAMAAADXqc3KAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAACiUExURQAAAPCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqvCqqgAAAPpCPqAAAAA0dFJOUwABHVB8jn9THgLw9FHa8qeSqvbfL4AYMR8hIhAP9d7xfZB+F3uri5Wo79ncLjDzqZTbjFK31fRQAAAAAWJLR0QAiAUdSAAAAAd0SU1FB+oLDAgpFviMZ+8AAAD3SURBVCjPhZLrUoQwDIVTWLkIi1Ldiii6rKx7Udfbef9nMylYoOOM+VHSb5LmJIHoP1NBuDiL4kTNcRqeo7csTyc8WDIqLi5Lzd+rxPFrvq6MdU3E/s3AK46+dVF1BvQ56RL6bvLufYMHWycG6pmSGshF5yPWo4o24HODRtkKT44DrSiwVXJoNXJIhtKIiTpsPU5UYkP0jJ3PqZUXO5Q+p71khGh8rjLRmwDGZjs+qFIHRK6D3lYoRGj+R+ehndXRm1WBl34nXCWbTFeP1V5ZUWRs/2bN/puLSo58Pb1/bGWDn9Vs54dh56c4nSmRv6T7WnxXvwP9AWF1HydNzyQcAAAAAElFTkSuQmCC");
+        private readonly Image checkedIcon = LoadIcon("iVBORw0KGgoAAAANSUhEUgAAABgAAAAYBAMAAAASWSDLAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAAeUExURQAAAOWaKOWaKOWaKOWaKOWaKOWaKOWaKOWaKAAAABJPWSQAAAAIdFJOUwADVZDZlx0IWf1KIAAAAAFiS0dEAIgFHUgAAAAHdElNRQfqCwwIMAJ5VhqKAAAAaklEQVQY02NgwA0YlY0hQBHIEemAghYBBgaNVoiEaYcCA4NFAFR9hAGQYwDlWGDnsJkhcTKaERy2jjYoB6gkoyMBymHuSANKwGSA1ifATcsAScA4bCAJuGnleFwA4yC7GsU/KD5FCQMkAABNpinsWcvDrAAAAABJRU5ErkJggg==");
+        private readonly Image uncheckedIcon = LoadIcon("iVBORw0KGgoAAAANSUhEUgAAABgAAAAYBAMAAAASWSDLAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAAYUExURQAAAKizxqizxqizxqizxqizxqizxgAAAMNqlWgAAAAGdFJOUwADVZDZlxZXQpAAAAABYktHRACIBR1IAAAAB3RJTUUH6gsMCDACeVYaigAAADxJREFUGNNjYMANGJWNIUARyBFJg4IUAQYGtVSIhGmaAgODWQBUfZgBkGMA5ZgNdg6yq1H8g+JTlDBAAgBmRBwpTSPR5wAAAABJRU5ErkJggg==");
         private bool isLoading;
         private bool isUpdating;
         private int lastReportedProgress = -1;
@@ -1300,42 +1312,37 @@ namespace WotModLauncher
 
         private static readonly Color ColBg = Color.FromArgb(18, 22, 31);
         private static readonly Color ColPanel = Color.FromArgb(24, 30, 43);
-        private static readonly Color ColRow = Color.FromArgb(28, 36, 50);
-        private static readonly Color ColList = Color.FromArgb(22, 28, 40);
         private static readonly Color ColText = Color.FromArgb(240, 244, 250);
-        private static readonly Color ColMuted = Color.FromArgb(148, 160, 180);
+        private static readonly Color ColMuted = Color.FromArgb(168, 179, 198);
         private static readonly Color ColGold = Color.FromArgb(229, 154, 40);
         private static readonly Color ColGreen = Color.FromArgb(110, 231, 160);
         private static readonly Color ColButton = Color.FromArgb(34, 42, 58);
-        private static readonly Color ColButtonBorder = Color.FromArgb(60, 72, 94);
+        private static readonly Color ColBorder = Color.FromArgb(60, 72, 94);
 
         public UpdateDialogForm(string gamePath, string gameVer, List<PendingModUpdate> updates, SelfUpdateState launcherUpdate)
         {
             this.gamePath = gamePath;
-            this.gameVer = gameVer;
             this.launcherUpdate = launcherUpdate;
-            this.ApplyLauncherUpdate = launcherUpdate != null;
-
+            ApplyLauncherUpdate = launcherUpdate != null;
             foreach (PendingModUpdate item in updates)
             {
                 if (item.IsNew) newItems.Add(item);
                 else updateItems.Add(item);
             }
 
-            Text = "WoT Modpack — Оновлення модів";
+            Text = "WoT Modpack | by Niedvin — Оновлення модів";
             StartPosition = FormStartPosition.CenterScreen;
-            Size = new Size(1020, 720);
-            MinimumSize = new Size(820, 600);
+            AutoScaleDimensions = new SizeF(96f, 96f);
+            AutoScaleMode = AutoScaleMode.Dpi;
+            ClientSize = new Size(1280, 960);
+            MinimumSize = new Size(1100, 680);
+            Rectangle screen = Screen.PrimaryScreen.WorkingArea;
+            Size = new Size(Math.Max(MinimumSize.Width, Math.Min(Width, screen.Width - 48)),
+                Math.Max(MinimumSize.Height, Math.Min(Height, screen.Height - 48)));
             BackColor = ColBg;
             ForeColor = ColText;
             Font = fontBase;
-            AutoScaleMode = AutoScaleMode.None;
-            FormBorderStyle = FormBorderStyle.Sizable;
-            MaximizeBox = true;
-            MinimizeBox = false;
-            TopMost = true;
             DoubleBuffered = true;
-
             try
             {
                 string ico = Path.Combine(gamePath, "game_metadata", "game.ico");
@@ -1343,229 +1350,203 @@ namespace WotModLauncher
             }
             catch { }
 
-            TableLayoutPanel root = new TableLayoutPanel();
-            root.Dock = DockStyle.Fill;
-            root.ColumnCount = 1;
-            root.RowCount = 4;
-            root.BackColor = ColBg;
-            root.Margin = new Padding(0);
-            root.Padding = new Padding(0);
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 74));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 62));
+            TableLayoutPanel root = MakeTable(1, 4);
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 84));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, launcherUpdate == null ? 0 : 66));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 136));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 116));
             Controls.Add(root);
 
-            Panel header = new Panel();
-            header.Dock = DockStyle.Fill;
+            TableLayoutPanel header = MakeTable(2, 1);
+            header.Padding = new Padding(24, 12, 24, 12);
             header.BackColor = ColPanel;
-            header.Margin = new Padding(0);
-            TableLayoutPanel headerLayout = new TableLayoutPanel();
-            headerLayout.Dock = DockStyle.Fill;
-            headerLayout.ColumnCount = 1;
-            headerLayout.RowCount = 2;
-            headerLayout.Padding = new Padding(20, 8, 20, 6);
-            headerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
-            headerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
-            lblTitle = new Label();
-            lblTitle.Text = "ДОСТУПНІ ОНОВЛЕННЯ МОДІВ";
-            lblTitle.Font = fontTitle;
-            lblTitle.ForeColor = ColText;
-            lblTitle.Dock = DockStyle.Fill;
-            lblTitle.TextAlign = ContentAlignment.MiddleLeft;
-            lblSubtitle = new Label();
-            lblSubtitle.Font = fontBase;
-            lblSubtitle.ForeColor = ColGold;
-            lblSubtitle.Dock = DockStyle.Fill;
-            lblSubtitle.TextAlign = ContentAlignment.MiddleLeft;
-            headerLayout.Controls.Add(lblTitle, 0, 0);
-            headerLayout.Controls.Add(lblSubtitle, 0, 1);
-            header.Controls.Add(headerLayout);
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 290));
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            Label title = MakeLabel("Оновлення модів", fontTitle, ColText);
+            Label location = MakeLabel("Папка гри: " + gamePath + "\nВерсія гри: " + gameVer, fontBase, ColMuted);
+            location.TextAlign = ContentAlignment.MiddleRight;
+            toolTip.SetToolTip(location, gamePath);
+            header.Controls.Add(title, 0, 0);
+            header.Controls.Add(location, 1, 0);
             root.Controls.Add(header, 0, 0);
 
-            Panel launcherPanel = new Panel();
-            launcherPanel.Dock = DockStyle.Fill;
-            launcherPanel.BackColor = ColRow;
-            launcherPanel.Margin = new Padding(0);
-            TableLayoutPanel launcherLayout = new TableLayoutPanel();
-            launcherLayout.Dock = DockStyle.Fill;
-            launcherLayout.ColumnCount = 2;
-            launcherLayout.RowCount = 1;
-            launcherLayout.Padding = new Padding(20, 8, 20, 8);
-            launcherLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            launcherLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            TableLayoutPanel launcherPanel = MakeTable(2, 1);
+            launcherPanel.Padding = new Padding(24, 8, 24, 8);
+            launcherPanel.BackColor = ColPanel;
+            launcherPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200));
+            launcherPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             chkLauncher = new CheckBox();
-            chkLauncher.AutoSize = true;
             chkLauncher.Text = "Оновити лаунчер";
-            chkLauncher.ForeColor = ColText;
             chkLauncher.Checked = launcherUpdate != null;
-            chkLauncher.Enabled = launcherUpdate != null;
-            chkLauncher.Visible = launcherUpdate != null;
-            chkLauncher.Anchor = AnchorStyles.Left;
-            chkLauncher.CheckedChanged += (s, e) => UpdateState();
-            lblLauncher = new Label();
-            lblLauncher.Dock = DockStyle.Fill;
-            lblLauncher.TextAlign = ContentAlignment.MiddleLeft;
-            lblLauncher.ForeColor = ColMuted;
-            if (launcherUpdate != null)
-                lblLauncher.Text = string.Format("Лаунчер: {0} → {1} — завантажиться після запуску, застосується при наступному старті", Program.LauncherVersion, launcherUpdate.version);
-            else
-                lblLauncher.Text = "Лаунчер актуальний: " + Program.LauncherVersion;
-            launcherLayout.Controls.Add(chkLauncher, 0, 0);
-            launcherLayout.Controls.Add(lblLauncher, 1, 0);
-            launcherPanel.Controls.Add(launcherLayout);
+            chkLauncher.Dock = DockStyle.Fill;
+            chkLauncher.ForeColor = ColText;
+            chkLauncher.CheckedChanged += (sender, e) => UpdateState();
+            Label launcherInfo = MakeLabel(launcherUpdate == null ? "" : string.Format(
+                "{0} → {1}\nЗавантажиться після запуску гри та застосується при наступному старті.",
+                Program.LauncherVersion, launcherUpdate.version), fontBase, ColMuted);
+            launcherPanel.Controls.Add(chkLauncher, 0, 0);
+            launcherPanel.Controls.Add(launcherInfo, 1, 0);
+            launcherPanel.Visible = launcherUpdate != null;
             root.Controls.Add(launcherPanel, 0, 1);
 
-            lblUpdatesHeader = CreateHeaderLabel("ОНОВЛЕННЯ", ColGold);
-            lblNewHeader = CreateHeaderLabel("НОВІ МОДИ", ColGreen);
-            listUpdates = CreateList();
-            listNew = CreateList();
-            lblUpdatesEmpty = CreateEmptyLabel("Немає оновлень");
-            lblNewEmpty = CreateEmptyLabel("Немає нових модів");
+            TableLayoutPanel workspace = MakeTable(2, 1);
+            workspace.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
+            workspace.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
+            root.Controls.Add(workspace, 0, 2);
 
-            TableLayoutPanel lists = new TableLayoutPanel();
-            lists.Dock = DockStyle.Fill;
-            lists.ColumnCount = 2;
-            lists.RowCount = 1;
-            lists.BackColor = ColBg;
-            lists.Padding = new Padding(16, 10, 16, 6);
-            lists.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            lists.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            lists.Controls.Add(CreateColumn(lblUpdatesHeader, listUpdates, lblUpdatesEmpty, new Padding(0, 0, 8, 0)), 0, 0);
-            lists.Controls.Add(CreateColumn(lblNewHeader, listNew, lblNewEmpty, new Padding(8, 0, 0, 0)), 1, 0);
-            root.Controls.Add(lists, 0, 2);
+            TableLayoutPanel selection = MakeTable(1, 2);
+            selection.Padding = new Padding(16, 14, 16, 0);
+            selection.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+            selection.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            FlowLayoutPanel toolbar = new FlowLayoutPanel();
+            toolbar.Dock = DockStyle.Fill;
+            toolbar.WrapContents = false;
+            btnSelectAll = CreateButton("Вибрати всі", 130, false);
+            btnSelectNone = CreateButton("Зняти всі", 130, false);
+            btnSelectAll.Click += (sender, e) => SetAllChecked(true);
+            btnSelectNone.Click += (sender, e) => SetAllChecked(false);
+            toolbar.Controls.Add(btnSelectAll);
+            toolbar.Controls.Add(btnSelectNone);
+            selection.Controls.Add(toolbar, 0, 0);
 
-            Panel footer = new Panel();
-            footer.Dock = DockStyle.Fill;
-            footer.BackColor = ColBg;
-            footer.Padding = new Padding(16, 4, 16, 10);
-            TableLayoutPanel footerLayout = new TableLayoutPanel();
-            footerLayout.Dock = DockStyle.Fill;
-            footerLayout.ColumnCount = 1;
-            footerLayout.RowCount = 3;
-            footerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
-            footerLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 16));
-            footerLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            modScroll = new Panel();
+            modScroll.Dock = DockStyle.Fill;
+            modScroll.AutoScroll = true;
+            modScroll.Name = "ModSelection";
+            modStack = MakeTable(1, 0);
+            modStack.Dock = DockStyle.Top;
+            modStack.AutoSize = true;
+            modStack.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            modStack.GrowStyle = TableLayoutPanelGrowStyle.AddRows;
+            modStack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            modScroll.Controls.Add(modStack);
+            selection.Controls.Add(modScroll, 0, 1);
+            workspace.Controls.Add(selection, 0, 0);
+            lblUpdatesHeader = MakeLabel("", fontHeader, ColText);
+            lblNewHeader = MakeLabel("", fontHeader, ColText);
+            lblEmpty = MakeLabel("Усі моди оновлені", fontBase, ColMuted);
 
-            lblStatus = new Label();
-            lblStatus.Dock = DockStyle.Fill;
-            lblStatus.TextAlign = ContentAlignment.MiddleLeft;
-            lblStatus.ForeColor = ColMuted;
+            Panel details = new Panel();
+            details.Dock = DockStyle.Fill;
+            details.Padding = new Padding(25, 20, 24, 16);
+            details.Paint += (sender, e) =>
+            {
+                using (Pen border = new Pen(ColBorder))
+                    e.Graphics.DrawLine(border, 0, 0, 0, details.Height);
+            };
+            TableLayoutPanel detailLayout = MakeTable(1, 3);
+            detailLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
+            detailLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
+            detailLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            lblDetailsTitle = MakeLabel("Оберіть мод", fontTitle, ColText);
+            lblDetailsTitle.Name = "ModTitle";
+            lblDetailsMeta = MakeLabel("", fontBase, ColGreen);
+            detailLayout.Controls.Add(lblDetailsTitle, 0, 0);
+            detailLayout.Controls.Add(lblDetailsMeta, 0, 1);
+            reading = new Panel();
+            reading.Dock = DockStyle.Fill;
+            reading.AutoScroll = true;
+            TableLayoutPanel paragraphs = MakeTable(1, 0);
+            paragraphs.Dock = DockStyle.Top;
+            paragraphs.AutoSize = true;
+            paragraphs.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            paragraphs.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            Label changesHeading = MakeParagraph("Що зміниться", fontHeader, ColText, 18);
+            lblChanges = MakeParagraph("", fontReading, ColText, 8);
+            lblChanges.Name = "ModChanges";
+            Label descriptionHeading = MakeParagraph("Для чого цей мод", fontHeader, ColText, 26);
+            lblDescription = MakeParagraph("Оберіть мод зі списку, щоб прочитати опис і зміни.", fontReading, ColText, 8);
+            lblDescription.Name = "ModDescription";
+            lblWarning = MakeParagraph("", fontBase, Color.FromArgb(240, 170, 170), 24);
+            foreach (Label label in new[] { changesHeading, lblChanges, descriptionHeading, lblDescription, lblWarning })
+                paragraphs.Controls.Add(label);
+            reading.Controls.Add(paragraphs);
+            reading.SizeChanged += (sender, e) =>
+            {
+                int width = Math.Max(100, reading.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 8);
+                foreach (Control label in paragraphs.Controls)
+                    label.MaximumSize = new Size(width, 0);
+            };
+            detailLayout.Controls.Add(reading, 0, 2);
+            details.Controls.Add(detailLayout);
+            workspace.Controls.Add(details, 1, 0);
+
+            footer = MakeTable(1, 3);
+            footer.Padding = new Padding(24, 6, 24, 12);
+            footer.BackColor = ColPanel;
+            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
+            footer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            lblStatus = MakeLabel("", fontBase, ColMuted);
             progress = new ProgressBar();
             progress.Dock = DockStyle.Fill;
-            progress.Minimum = 0;
-            progress.Maximum = 100;
-            progress.Value = 0;
-            progress.Style = ProgressBarStyle.Continuous;
-
+            progress.Visible = false;
+            progress.Margin = new Padding(0, 2, 0, 4);
+            TableLayoutPanel actions = MakeTable(2, 1);
+            actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            actions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             FlowLayoutPanel buttons = new FlowLayoutPanel();
+            buttons.AutoSize = true;
             buttons.Dock = DockStyle.Fill;
             buttons.FlowDirection = FlowDirection.LeftToRight;
-            buttons.WrapContents = true;
-            buttons.AutoScroll = false;
-            buttons.Padding = new Padding(0);
-            buttons.Margin = new Padding(0);
-
-            btnUpdate = CreateButton("Грати", 220, true);
-            btnSkip = CreateButton("Без оновлення", 150, false);
-            btnNoMods = CreateButton("Без модів", 130, false);
-            btnDecline = CreateButton("Більше не пропонувати", 180, false);
-            btnSelectAll = CreateButton("Вибрати все", 120, false);
-            btnSelectNone = CreateButton("Зняти все", 120, false);
-            btnDecline.BackColor = Color.FromArgb(54, 36, 42);
-            btnDecline.ForeColor = Color.FromArgb(240, 170, 170);
-            btnDecline.FlatAppearance.BorderColor = Color.FromArgb(96, 62, 70);
-
-            btnUpdate.Click += (s, e) => OnPrimary();
-            btnSkip.Click += (s, e) => OnSkip();
-            btnNoMods.Click += (s, e) => OnNoMods();
-            btnDecline.Click += (s, e) => OnDecline();
-            btnSelectAll.Click += (s, e) => SetAllChecked(true);
-            btnSelectNone.Click += (s, e) => SetAllChecked(false);
-
-            buttons.Controls.Add(btnUpdate);
+            buttons.WrapContents = false;
+            btnUpdate = CreateButton("Оновити й грати", 220, true);
+            btnSkip = CreateButton("Без оновлення", 180, false);
+            btnOther = CreateButton("Інші дії", 140, false);
+            otherMenu = new ContextMenuStrip();
+            otherMenu.Items.Add("Запустити без модів", null, (sender, e) => OnNoMods());
+            btnOther.Click += (sender, e) => otherMenu.Show(btnOther, new Point(0, -otherMenu.PreferredSize.Height));
+            btnUpdate.Click += (sender, e) => OnPrimary();
+            btnSkip.Click += (sender, e) => OnSkip();
+            buttons.Controls.Add(btnOther);
             buttons.Controls.Add(btnSkip);
-            buttons.Controls.Add(btnNoMods);
-            buttons.Controls.Add(btnDecline);
-            buttons.Controls.Add(btnSelectAll);
-            buttons.Controls.Add(btnSelectNone);
-            footerLayout.Controls.Add(lblStatus, 0, 0);
-            footerLayout.Controls.Add(progress, 0, 1);
-            footerLayout.Controls.Add(buttons, 0, 2);
-            footer.Controls.Add(footerLayout);
+            buttons.Controls.Add(btnUpdate);
+            Label backup = MakeLabel("Бекап перед заміною модів увімкнено", fontBase, ColMuted);
+            actions.Controls.Add(backup, 0, 0);
+            actions.Controls.Add(buttons, 1, 0);
+            footer.Controls.Add(lblStatus, 0, 0);
+            footer.Controls.Add(progress, 0, 1);
+            footer.Controls.Add(actions, 0, 2);
             root.Controls.Add(footer, 0, 3);
-
             AcceptButton = btnUpdate;
             CancelButton = btnSkip;
-
             LoadItems();
         }
 
-        private Label CreateHeaderLabel(string text, Color color)
+        private static TableLayoutPanel MakeTable(int columns, int rowCount)
+        {
+            TableLayoutPanel table = new TableLayoutPanel();
+            table.ColumnCount = columns;
+            table.RowCount = rowCount;
+            table.Dock = DockStyle.Fill;
+            table.Margin = Padding.Empty;
+            table.Padding = Padding.Empty;
+            return table;
+        }
+
+        private static Label MakeLabel(string text, Font font, Color color)
         {
             Label label = new Label();
             label.Text = text;
-            label.Dock = DockStyle.Fill;
-            label.TextAlign = ContentAlignment.MiddleLeft;
-            label.Font = fontHeader;
+            label.Font = font;
             label.ForeColor = color;
-            return label;
-        }
-
-        private Label CreateEmptyLabel(string text)
-        {
-            Label label = new Label();
-            label.Text = text;
             label.Dock = DockStyle.Fill;
-            label.TextAlign = ContentAlignment.MiddleCenter;
-            label.ForeColor = ColMuted;
-            label.BackColor = ColList;
-            label.Visible = false;
+            label.Margin = Padding.Empty;
+            label.AutoEllipsis = true;
+            label.TextAlign = ContentAlignment.MiddleLeft;
             return label;
         }
 
-        private ListView CreateList()
+        private static Label MakeParagraph(string text, Font font, Color color, int top)
         {
-            ListView list = new ListView();
-            list.Dock = DockStyle.Fill;
-            list.View = View.Details;
-            list.FullRowSelect = true;
-            list.CheckBoxes = true;
-            list.HideSelection = false;
-            list.MultiSelect = false;
-            list.BorderStyle = BorderStyle.FixedSingle;
-            list.BackColor = ColList;
-            list.ForeColor = ColText;
-            list.Font = fontBase;
-            list.HeaderStyle = ColumnHeaderStyle.Nonclickable;
-            list.ShowItemToolTips = true;
-            list.Columns.Add("Мод", 160);
-            list.Columns.Add("Версія", 100);
-            list.Columns.Add("Зміни", 160);
-            list.Resize += (s, e) => FitColumns(list);
-            list.ItemChecked += List_ItemChecked;
-            return list;
-        }
-
-        private Control CreateColumn(Label header, ListView list, Label empty, Padding margin)
-        {
-            TableLayoutPanel col = new TableLayoutPanel();
-            col.Dock = DockStyle.Fill;
-            col.ColumnCount = 1;
-            col.RowCount = 2;
-            col.Margin = margin;
-            col.BackColor = ColBg;
-            col.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
-            col.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            Panel box = new Panel();
-            box.Dock = DockStyle.Fill;
-            box.BackColor = ColBg;
-            box.Controls.Add(list);
-            box.Controls.Add(empty);
-            empty.BringToFront();
-            col.Controls.Add(header, 0, 0);
-            col.Controls.Add(box, 0, 1);
-            return col;
+            Label label = MakeLabel(text, font, color);
+            label.AutoSize = true;
+            label.AutoEllipsis = false;
+            label.Dock = DockStyle.None;
+            label.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            label.Margin = new Padding(0, top, 0, 0);
+            label.UseCompatibleTextRendering = true;
+            return label;
         }
 
         private Button CreateButton(string text, int width, bool primary)
@@ -1573,110 +1554,113 @@ namespace WotModLauncher
             Button button = new Button();
             button.Text = text;
             button.Width = width;
-            button.Height = 36;
-            button.Margin = new Padding(0, 4, 8, 4);
+            button.Height = 42;
+            button.Margin = new Padding(0, 4, 10, 4);
             button.FlatStyle = FlatStyle.Flat;
             button.UseVisualStyleBackColor = false;
             button.Font = fontButton;
-            if (primary)
-            {
-                button.BackColor = ColGold;
-                button.ForeColor = Color.FromArgb(20, 24, 32);
-                button.FlatAppearance.BorderSize = 0;
-            }
-            else
-            {
-                button.BackColor = ColButton;
-                button.ForeColor = ColText;
-                button.FlatAppearance.BorderSize = 1;
-                button.FlatAppearance.BorderColor = ColButtonBorder;
-            }
+            button.BackColor = primary ? ColGold : ColButton;
+            button.ForeColor = primary ? ColBg : ColText;
+            button.FlatAppearance.BorderSize = primary ? 0 : 1;
+            button.FlatAppearance.BorderColor = ColBorder;
+            button.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(246, 174, 58) : Color.FromArgb(46, 56, 75);
             return button;
         }
 
-        private static string ModRowTitle(ManifestModEntry remote)
+        // Lucide icons, ISC license: docs/licenses/lucide.txt; embedded for single-file csc builds — 2026-11-12
+        private static Image LoadIcon(string encoded)
         {
-            string title = remote.title ?? remote.id;
-            return remote.possible_cheat ? "[!] " + title : title;
-        }
-
-        private static string ModRowTooltip(ManifestModEntry remote, string changes)
-        {
-            if (!remote.possible_cheat) return changes;
-            string note = string.IsNullOrEmpty(remote.possible_cheat_note)
-                ? "Може детектуватися як чіт. Використовуйте на власний розсуд."
-                : remote.possible_cheat_note;
-            return string.IsNullOrEmpty(changes) ? note : note + "\n\n" + changes;
+            using (MemoryStream stream = new MemoryStream(Convert.FromBase64String(encoded)))
+            using (Image source = Image.FromStream(stream))
+                return new Bitmap(source);
         }
 
         private void LoadItems()
         {
             isLoading = true;
-            foreach (PendingModUpdate item in updateItems)
-            {
-                string changes = item.Remote.changes ?? "Оновлення сумісності та покращення стабільності";
-                ListViewItem row = new ListViewItem(ModRowTitle(item.Remote));
-                row.SubItems.Add(string.Format("{0} → {1}", item.InstalledVersion ?? "?", item.Remote.version));
-                row.SubItems.Add(changes);
-                row.ToolTipText = ModRowTooltip(item.Remote, changes);
-                row.Tag = item;
-                row.Checked = true;
-                listUpdates.Items.Add(row);
-            }
-            foreach (PendingModUpdate item in newItems)
-            {
-                string changes = item.Remote.changes ?? "";
-                ListViewItem row = new ListViewItem(ModRowTitle(item.Remote));
-                row.SubItems.Add("новий • " + item.Remote.version);
-                row.SubItems.Add(changes);
-                row.ToolTipText = ModRowTooltip(item.Remote, changes);
-                row.Tag = item;
-                row.Checked = false;
-                listNew.Items.Add(row);
-            }
+            foreach (PendingModUpdate item in updateItems) AddRow(item, true);
+            foreach (PendingModUpdate item in newItems) AddRow(item, false);
             isLoading = false;
-            RefreshEmptyStates();
-            FitColumns(listUpdates);
-            FitColumns(listNew);
+            RebuildList();
+            if (updateItems.Count > 0) SelectItem(updateItems[0]);
+            else if (newItems.Count > 0) SelectItem(newItems[0]);
+            else SelectItem(null);
             UpdateState();
         }
 
-        private void RefreshEmptyStates()
+        private void AddRow(PendingModUpdate item, bool isChecked)
         {
-            listUpdates.Visible = updateItems.Count > 0;
-            lblUpdatesEmpty.Visible = updateItems.Count == 0;
-            listNew.Visible = newItems.Count > 0;
-            lblNewEmpty.Visible = newItems.Count == 0;
-            if (lblUpdatesEmpty.Visible) lblUpdatesEmpty.BringToFront();
-            if (lblNewEmpty.Visible) lblNewEmpty.BringToFront();
+            ModUpdateRow row = new ModUpdateRow(item, isChecked, fontHeader, fontBase, declineIcon, checkedIcon, uncheckedIcon, toolTip);
+            row.CheckChanged += (sender, e) => { if (!isLoading) UpdateState(); };
+            row.ItemSelected += (sender, e) => SelectItem(item);
+            row.Declined += (sender, e) => OnDecline(item);
+            rows.Add(item, row);
         }
 
-        private static void FitColumns(ListView list)
+        private void AddStackControl(Control control, int height)
         {
-            if (list.Columns.Count < 3) return;
-            int width = list.ClientSize.Width - list.Columns[0].Width - list.Columns[1].Width - 24;
-            if (width > 80) list.Columns[2].Width = width;
+            int index = modStack.RowCount++;
+            modStack.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            control.Dock = DockStyle.Fill;
+            control.Margin = Padding.Empty;
+            modStack.Controls.Add(control, 0, index);
         }
 
-        private void List_ItemChecked(object sender, ItemCheckedEventArgs e)
+        private void RebuildList()
         {
-            if (isLoading) return;
-            UpdateState();
+            modStack.SuspendLayout();
+            modStack.Controls.Clear();
+            modStack.RowStyles.Clear();
+            modStack.RowCount = 0;
+            if (updateItems.Count > 0)
+            {
+                AddStackControl(lblUpdatesHeader, 46);
+                foreach (PendingModUpdate item in updateItems) AddStackControl(rows[item], 90);
+            }
+            if (newItems.Count > 0)
+            {
+                AddStackControl(lblNewHeader, 52);
+                foreach (PendingModUpdate item in newItems) AddStackControl(rows[item], 90);
+            }
+            if (rows.Count == 0) AddStackControl(lblEmpty, 80);
+            modStack.ResumeLayout(true);
+        }
+
+        private void SelectItem(PendingModUpdate item)
+        {
+            selectedItem = item;
+            reading.AutoScrollPosition = Point.Empty;
+            reading.Visible = item != null;
+            foreach (KeyValuePair<PendingModUpdate, ModUpdateRow> entry in rows)
+                entry.Value.SetSelected(entry.Key == item);
+            if (item == null)
+            {
+                lblDetailsTitle.Text = "Усі моди оновлені";
+                lblDetailsMeta.Text = "";
+                lblChanges.Text = "Немає вибраного мода.";
+                lblDescription.Text = "";
+                lblWarning.Visible = false;
+                return;
+            }
+            ManifestModEntry remote = item.Remote;
+            lblDetailsTitle.Text = remote.title ?? remote.id;
+            toolTip.SetToolTip(lblDetailsTitle, lblDetailsTitle.Text);
+            lblDetailsMeta.Text = (string.IsNullOrWhiteSpace(remote.author) ? "" : remote.author + " · ")
+                + (item.IsNew ? "Новий мод · " + remote.version : (item.InstalledVersion ?? "?") + " → " + remote.version);
+            lblChanges.Text = string.IsNullOrWhiteSpace(remote.changes) ? "Зміни не вказані в маніфесті." : remote.changes;
+            lblDescription.Text = string.IsNullOrWhiteSpace(remote.description) ? "Опис мода відсутній у цьому маніфесті." : remote.description;
+            lblWarning.Visible = remote.possible_cheat;
+            lblWarning.Text = string.IsNullOrWhiteSpace(remote.possible_cheat_note)
+                ? "Може визначатися як чіт. Використовуйте на власний ризик." : remote.possible_cheat_note;
         }
 
         private List<PendingModUpdate> GetChecked()
         {
             List<PendingModUpdate> result = new List<PendingModUpdate>();
-            foreach (ListViewItem row in listUpdates.CheckedItems)
-            {
-                PendingModUpdate item = row.Tag as PendingModUpdate;
-                if (item != null) result.Add(item);
-            }
-            foreach (ListViewItem row in listNew.CheckedItems)
-            {
-                PendingModUpdate item = row.Tag as PendingModUpdate;
-                if (item != null) result.Add(item);
-            }
+            foreach (PendingModUpdate item in updateItems)
+                if (rows[item].IsChecked) result.Add(item);
+            foreach (PendingModUpdate item in newItems)
+                if (rows[item].IsChecked) result.Add(item);
             return result;
         }
 
@@ -1684,8 +1668,7 @@ namespace WotModLauncher
         {
             if (isUpdating) return;
             isLoading = true;
-            foreach (ListViewItem row in listUpdates.Items) row.Checked = value;
-            foreach (ListViewItem row in listNew.Items) row.Checked = value;
+            foreach (ModUpdateRow row in rows.Values) row.IsChecked = value;
             isLoading = false;
             UpdateState();
         }
@@ -1693,26 +1676,15 @@ namespace WotModLauncher
         private void UpdateState()
         {
             if (isUpdating || lblStatus == null) return;
-            int total = updateItems.Count + newItems.Count;
             int checkedCount = GetChecked().Count;
-            lblUpdatesHeader.Text = "ОНОВЛЕННЯ (" + updateItems.Count + ")";
-            lblNewHeader.Text = "НОВІ МОДИ (" + newItems.Count + ")";
-            if (total == 0)
-                lblSubtitle.Text = "Оновлень модів немає • Клієнт WoT " + gameVer;
-            else
-                lblSubtitle.Text = string.Format("Оновлень: {0} • нових: {1} • Клієнт WoT {2}", updateItems.Count, newItems.Count, gameVer);
-            lblStatus.Text = total == 0
-                ? (launcherUpdate == null ? "Усі моди оновлені" : "Оновлень модів немає")
-                : string.Format("Вибрано: {0} із {1}", checkedCount, total);
+            lblUpdatesHeader.Text = "Оновлення · " + updateItems.Count;
+            lblNewHeader.Text = "Нові моди · " + newItems.Count;
+            lblStatus.Text = rows.Count == 0 ? "Усі моди оновлені" : string.Format("Вибрано: {0} із {1}", checkedCount, rows.Count);
             bool launcherChecked = launcherUpdate != null && chkLauncher.Checked;
-            if (checkedCount > 0) btnUpdate.Text = "Оновити вибране і грати";
-            else if (launcherChecked) btnUpdate.Text = "Оновити лаунчер і грати";
-            else btnUpdate.Text = "Грати";
-            btnDecline.Enabled = checkedCount > 0;
-            btnSkip.Visible = total > 0;
-            btnDecline.Visible = total > 0;
-            btnSelectAll.Enabled = total > 0;
-            btnSelectNone.Enabled = total > 0;
+            btnUpdate.Text = checkedCount > 0 ? "Оновити й грати" : launcherChecked ? "Оновити лаунчер й грати" : "Грати";
+            btnSkip.Visible = rows.Count > 0 || launcherUpdate != null;
+            btnSelectAll.Enabled = rows.Count > 0;
+            btnSelectNone.Enabled = rows.Count > 0;
         }
 
         private void OnPrimary()
@@ -1737,48 +1709,45 @@ namespace WotModLauncher
             Close();
         }
 
-        private void OnDecline()
+        private void OnDecline(PendingModUpdate item)
         {
-            if (isUpdating) return;
-            List<PendingModUpdate> selected = GetChecked();
-            if (selected.Count == 0)
+            if (isUpdating || !rows.ContainsKey(item)) return;
+            if (!ConfirmDecline(item)) return;
+            if (!Program.AddDeclinedMods(new List<string> { item.Remote.id }))
             {
-                MessageBox.Show("Познач моди, які більше не пропонувати.", "WoT Modpack",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this, "Не вдалося зберегти вибір. Мод залишився у списку.", "WoT Modpack",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            DialogResult answer = MessageBox.Show(
-                string.Format("Більше не пропонувати {0} мод(ів)?\nВони не будуть встановлюватися, оновлюватися чи пропонуватися.", selected.Count),
-                "WoT Modpack", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-            if (answer != DialogResult.Yes) return;
-
-            List<string> ids = new List<string>();
-            foreach (PendingModUpdate item in selected) ids.Add(item.Remote.id);
-            Program.AddDeclinedMods(ids);
-            isLoading = true;
-            foreach (PendingModUpdate item in selected)
-            {
-                RemoveRow(listUpdates, item);
-                RemoveRow(listNew, item);
-                updateItems.Remove(item);
-                newItems.Remove(item);
-            }
-            isLoading = false;
-            RefreshEmptyStates();
-            UpdateState();
+            RemoveItem(item);
         }
 
-        private static void RemoveRow(ListView list, PendingModUpdate target)
+        protected virtual bool ConfirmDecline(PendingModUpdate item)
         {
-            for (int i = list.Items.Count - 1; i >= 0; i--)
-            {
-                PendingModUpdate item = list.Items[i].Tag as PendingModUpdate;
-                if (item == target)
-                {
-                    list.Items.RemoveAt(i);
-                    return;
-                }
-            }
+            return MessageBox.Show(this,
+                "Більше не пропонувати «" + (item.Remote.title ?? item.Remote.id)
+                + "»?\nМод більше не встановлюватиметься й не оновлюватиметься. Встановлені файли залишаться у грі.",
+                "WoT Modpack", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+        }
+
+        protected virtual void ShowUpdateFailure(string reason)
+        {
+            MessageBox.Show(this, "Оновлення не вдалося (" + reason
+                + ").\nВідновлено попередні версії модів, запускаємо гру.",
+                "WoT Modpack Launcher", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
+        private void RemoveItem(PendingModUpdate item)
+        {
+            ModUpdateRow row = rows[item];
+            updateItems.Remove(item);
+            newItems.Remove(item);
+            rows.Remove(item);
+            RebuildList();
+            row.Dispose();
+            if (selectedItem == item)
+                SelectItem(updateItems.Count > 0 ? updateItems[0] : newItems.Count > 0 ? newItems[0] : null);
+            UpdateState();
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
@@ -1798,18 +1767,121 @@ namespace WotModLauncher
             isUpdating = true;
             btnUpdate.Enabled = false;
             btnSkip.Enabled = false;
-            btnNoMods.Enabled = false;
-            btnDecline.Enabled = false;
+            btnOther.Enabled = false;
             btnSelectAll.Enabled = false;
             btnSelectNone.Enabled = false;
-            listUpdates.Enabled = false;
-            listNew.Enabled = false;
+            foreach (ModUpdateRow row in rows.Values) row.Enabled = false;
+            chkLauncher.Enabled = false;
             ControlBox = false;
             progress.Value = 0;
+            progress.Visible = true;
+            footer.RowStyles[1].Height = 18;
             lblStatus.Text = "Підготовка резервної копії...";
             Thread worker = new Thread(() => RunUpdateWorker(selected));
             worker.IsBackground = true;
             worker.Start();
+        }
+
+        private sealed class ModUpdateRow : UserControl
+        {
+            private bool isSelected;
+            private readonly CheckBox check;
+            private readonly TableLayoutPanel layout;
+            private readonly TableLayoutPanel text;
+            public event EventHandler CheckChanged;
+            public event EventHandler ItemSelected;
+            public event EventHandler Declined;
+
+            public bool IsChecked
+            {
+                get { return check.Checked; }
+                set { check.Checked = value; }
+            }
+
+            public ModUpdateRow(PendingModUpdate item, bool isChecked, Font titleFont, Font bodyFont, Image icon, Image checkedIcon, Image uncheckedIcon, ToolTip toolTip)
+            {
+                DoubleBuffered = true;
+                BackColor = ColBg;
+                AccessibleName = item.Remote.title ?? item.Remote.id;
+                Padding = new Padding(4, 0, 4, 1);
+                layout = MakeTable(3, 1);
+                layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 40));
+                layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+                layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 42));
+                check = new CheckBox();
+                check.Checked = isChecked;
+                check.Size = new Size(36, 36);
+                check.Anchor = AnchorStyles.None;
+                check.Appearance = Appearance.Button;
+                check.AccessibleRole = AccessibleRole.CheckButton;
+                check.FlatStyle = FlatStyle.Flat;
+                check.FlatAppearance.BorderSize = 0;
+                check.FlatAppearance.CheckedBackColor = ColPanel;
+                check.Image = isChecked ? checkedIcon : uncheckedIcon;
+                check.ForeColor = ColGold;
+                check.AccessibleName = "Оновити «" + AccessibleName + "»";
+                check.CheckedChanged += (sender, e) => { check.Image = check.Checked ? checkedIcon : uncheckedIcon; if (CheckChanged != null) CheckChanged(this, EventArgs.Empty); };
+                text = MakeTable(2, 2);
+                text.Padding = new Padding(6, 17, 10, 15);
+                text.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+                text.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+                text.RowStyles.Add(new RowStyle(SizeType.Percent, 52));
+                text.RowStyles.Add(new RowStyle(SizeType.Percent, 48));
+                Label title = MakeLabel((item.Remote.possible_cheat ? "[!] " : "") + AccessibleName, titleFont, ColText);
+                Label version = MakeLabel(item.IsNew ? item.Remote.version : (item.InstalledVersion ?? "?") + " → " + item.Remote.version, bodyFont, ColGreen);
+                version.AutoSize = true;
+                version.TextAlign = ContentAlignment.MiddleRight;
+                version.Margin = new Padding(8, 0, 0, 0);
+                string purpose = string.IsNullOrWhiteSpace(item.Remote.summary) ? item.Remote.description : item.Remote.summary;
+                Label summary = MakeLabel(string.IsNullOrWhiteSpace(purpose)
+                    ? "Опис мода відсутній у цьому маніфесті." : purpose, bodyFont, ColMuted);
+                text.Controls.Add(title, 0, 0);
+                text.Controls.Add(version, 1, 0);
+                text.Controls.Add(summary, 0, 1);
+                text.SetColumnSpan(summary, 2);
+                Button decline = new Button();
+                decline.Name = "DeclineMod";
+                decline.Size = new Size(36, 36);
+                decline.Anchor = AnchorStyles.None;
+                decline.FlatStyle = FlatStyle.Flat;
+                decline.FlatAppearance.BorderSize = 0;
+                decline.FlatAppearance.MouseOverBackColor = Color.FromArgb(70, 49, 53);
+                decline.Image = icon;
+                decline.AccessibleName = "Більше не пропонувати «" + AccessibleName + "»";
+                toolTip.SetToolTip(decline, "Більше не пропонувати цей мод");
+                toolTip.SetToolTip(title, AccessibleName);
+                toolTip.SetToolTip(version, version.Text);
+                toolTip.SetToolTip(summary, summary.Text);
+                decline.Click += (sender, e) => { if (Declined != null) Declined(this, EventArgs.Empty); };
+                foreach (Control control in new Control[] { this, layout, text, title, version, summary })
+                {
+                    control.Click += (sender, e) => { if (ItemSelected != null) ItemSelected(this, EventArgs.Empty); };
+                }
+                check.Enter += (sender, e) => { if (ItemSelected != null) ItemSelected(this, EventArgs.Empty); };
+                layout.Controls.Add(check, 0, 0);
+                layout.Controls.Add(text, 1, 0);
+                layout.Controls.Add(decline, 2, 0);
+                Controls.Add(layout);
+            }
+
+            public void SetSelected(bool selected)
+            {
+                isSelected = selected;
+                BackColor = selected ? Color.FromArgb(55, 45, 28) : ColBg;
+                layout.BackColor = BackColor;
+                text.BackColor = layout.BackColor;
+                Invalidate();
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                base.OnPaint(e);
+                if (isSelected)
+                    using (SolidBrush accent = new SolidBrush(ColGold))
+                        e.Graphics.FillRectangle(accent, 0, 0, 4, Height - 1);
+                using (Pen border = new Pen(ColBorder))
+                    e.Graphics.DrawLine(border, 4, Height - 1, Width - 4, Height - 1);
+            }
         }
 
         private void RunUpdateWorker(List<PendingModUpdate> selected)
@@ -1832,7 +1904,6 @@ namespace WotModLauncher
                 var errors = new ConcurrentQueue<Exception>();
                 var tempLock = new object();
 
-                // Download and verify every package before the first installed file is touched — 2026-11-11
                 ParallelOptions options = new ParallelOptions { MaxDegreeOfParallelism = 4 };
                 Parallel.For(0, total, options, i =>
                 {
@@ -1901,7 +1972,6 @@ namespace WotModLauncher
                         string relOld = GetBackupRelativePath(update.LocalFilePath);
                         string bkpFile = Path.Combine(bkpDir, relOld);
 
-                        // A folder can sit where the new package must go; back it up before the update pair — 2026-11-11
                         if (!SamePath(update.LocalFilePath, newDestPath)
                             && (File.Exists(newDestPath) || Directory.Exists(newDestPath)))
                         {
@@ -1965,9 +2035,7 @@ namespace WotModLauncher
                     BeginInvoke(new Action(() =>
                     {
                         isUpdating = false;
-                        MessageBox.Show(
-                            "Оновлення не вдалося (" + actual.Message + ").\nВідновлено попередні версії модів, запускаємо гру.",
-                            "WoT Modpack Launcher", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        ShowUpdateFailure(actual.Message);
                         Close();
                     }));
                 }
@@ -2094,14 +2162,23 @@ namespace WotModLauncher
 
         protected override void Dispose(bool disposing)
         {
+            base.Dispose(disposing);
             if (disposing)
             {
+                lblUpdatesHeader.Dispose();
+                lblNewHeader.Dispose();
+                lblEmpty.Dispose();
+                toolTip.Dispose();
+                otherMenu.Dispose();
+                declineIcon.Dispose();
+                checkedIcon.Dispose();
+                uncheckedIcon.Dispose();
                 fontBase.Dispose();
                 fontTitle.Dispose();
                 fontHeader.Dispose();
                 fontButton.Dispose();
+                fontReading.Dispose();
             }
-            base.Dispose(disposing);
         }
     }
 }

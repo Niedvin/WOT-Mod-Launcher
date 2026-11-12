@@ -91,6 +91,7 @@ def main():
             'version': mod['version'],
             'author': mod.get('author', ''),
             'description': mod.get('description', ''),
+            'summary': (mod.get('readme_features') or [mod.get('description', '')])[0],
             'changes': mod.get('changes', ''),
             'default_checked': bool(mod.get('default_checked', True)),
             'possible_cheat': bool(mod.get('possible_cheat', False)),
@@ -111,7 +112,6 @@ def main():
             json.dump(info, handle, indent=4, ensure_ascii=False)
         print('Mod prepared: %s (%.2f MB)' % (folder, total_size / (1024 * 1024)))
 
-    # A renamed or dropped mod folder would otherwise still be offered by the installer
     for name in sorted(os.listdir(mods_dir)):
         path = os.path.join(mods_dir, name)
         if name not in expected_folders and os.path.isdir(path):
