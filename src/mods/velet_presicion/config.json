@@ -1,5 +1,6 @@
 {
   "enabled": true,
   "artillery": true,
-  "target_lock": true
+  "target_lock": true,
+  "fine_mouse": false
 }

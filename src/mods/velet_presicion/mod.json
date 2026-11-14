@@ -3,10 +3,10 @@
   "dir": "velet_presicion",
   "id": "ua.velet_presicion",
   "title": "Velet Presicion",
-  "version": "1.0.3",
+  "version": "1.0.5",
   "author": "Niedvin",
   "description": "Згладжує рух маркера гармати і оновлює його кожен кадр замість 10 разів на секунду під час ручного наведення, наведення артилерії та автозахоплення цілі.",
-  "changes": "Коло артилерії більше не тягнеться за прицілом: рідний relax рушія скорочено до кадру. Артилерія і автозахоплення вимикаються прапорцями в config.json.",
+  "changes": "Маркер малюється у екранному просторі власним провайдером: стрибки глибини цілі більше не смикають приціл, а коло артилерії й автозахоплення оновлюються покадрово. Додано дрібне наведення мишею (fine_mouse).",
   "default_checked": true,
   "clean_patterns": [
     "ua.velet_presicion*.wotmod"
@@ -17,15 +17,16 @@
     "Інтерполяція з перенесенням швидкості між кадрами прибирає смикання при русі прицілу.",
     "Стрибки глибини цілі згладжуються в екранному просторі, без стрибків маркера по екрану.",
     "Артилерійське коло оновлюється кожен кадр і більше не тягнеться за прицілом; автозахоплення цілі теж іде покадрово.",
-    "Серверні пакети наведення лишаються на рідних 10 Гц; реплеї та спостерігач — без змін."
+    "Серверні пакети наведення лишаються на рідних 10 Гц; реплеї та спостерігач — без змін.",
+    "Дрібне наведення мишею: на малих рухах приціл іде плавніше, на великих — рідна чутливість (fine_mouse)."
   ],
   "build": {
     "kind": "pyc",
     "source": "src/mods/velet_presicion/mod_velet_presicion.py",
     "entry": "res/scripts/client/gui/mods/mod_velet_presicion.pyc",
-    "output": "build/mods/{ver}/ua.velet_presicion_1.0.3.wotmod",
+    "output": "build/mods/{ver}/ua.velet_presicion_1.0.5.wotmod",
     "name": "Velet Presicion",
-    "description": "Smooths local gun marker movement and updates it every frame during manual aim, artillery aiming and target lock.",
+    "description": "Smooths the displayed penetration dot and both local aiming circles.",
     "extra": [],
     "test_commands": [
       [
@@ -37,8 +38,8 @@
   },
   "files": [
     {
-      "source": "build/mods/{ver}/ua.velet_presicion_1.0.3.wotmod",
-      "target": "game_files/mods/_VERSION_/ua.velet_presicion_1.0.3.wotmod"
+      "source": "build/mods/{ver}/ua.velet_presicion_1.0.5.wotmod",
+      "target": "game_files/mods/_VERSION_/ua.velet_presicion_1.0.5.wotmod"
     },
     {
       "source": "src/mods/velet_presicion/config.json",
@@ -48,6 +49,7 @@
   "obsolete": [
     "ua.velet_presicion_1.0.0.wotmod",
     "ua.velet_presicion_1.0.1.wotmod",
-    "ua.velet_presicion_1.0.2.wotmod"
+    "ua.velet_presicion_1.0.2.wotmod",
+    "ua.velet_presicion_1.0.3.wotmod"
   ]
 }

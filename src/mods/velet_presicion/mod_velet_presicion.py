@@ -6,6 +6,7 @@ from functools import wraps
 
 import BattleReplay
 import BigWorld
+import GUI
 import Math
 from aih_constants import GUN_MARKER_TYPE
 from constants import AIMING_MODE, SERVER_TICK_LENGTH
@@ -21,9 +22,13 @@ _MIN_TIME_GAP = 0.0005
 _MIN_ANIMATION = 0.002
 _MARKER_SEGMENTS = 8
 _MAX_SPEED_RATIO = 3.0
+_FINE_MOUSE_PIXELS = 0.65
+_STOCK_MOUSE_COUNTS = 10.0
 _CTRL_MODES = ('arcade', 'sniper')
 _ARTY_MODES = ('strategic', 'arty')
-_DEFAULTS = {'enabled': True, 'artillery': True, 'target_lock': True}
+_DEFAULTS = {'enabled': True, 'artillery': True, 'target_lock': True, 'fine_mouse': False}
+_DISPLAY_BLEND = 0.045
+_DISPLAY_DEPTH = 50.0
 _ROTATION_TICK = '_VehicleGunRotator__ROTATION_TICK_LENGTH'
 _MIN_TIME_DIFF = '_VehicleGunRotator__INSUFFICIENT_TIME_DIFF'
 _ON_TICK = '_VehicleGunRotator__onTick'
@@ -32,6 +37,8 @@ _TICK_TIME = '_velet_tick_time'
 _SPAN_STATE = '_velet_span'
 _MISSING = object()
 _hooks = []
+_display_markers = {}
+_spg_marker_class = None
 _state = {'animation': None}
 _config = dict(_DEFAULTS)
 
@@ -178,8 +185,8 @@ def _wrap_marker_animation(original):
     @wraps(original)
     def animate(marker, positionMatrix, relaxTime=0.0):
         duration = _state['animation'] or relaxTime
-        if (_hooks and duration >= _MIN_ANIMATION
-                and marker._gunMarkerType in (GUN_MARKER_TYPE.CLIENT, GUN_MARKER_TYPE.DUAL_ACC)):
+        if (_hooks and isinstance(marker, _spg_marker_class) and duration >= _MIN_ANIMATION
+                and marker._gunMarkerType == GUN_MARKER_TYPE.CLIENT):
             view = BigWorld.camera()
             if view is not None:
                 animation = marker._dataProvider.positionMatrixProvider
@@ -189,9 +196,93 @@ def _wrap_marker_animation(original):
                     animation.time = 0.0
                     return
         setattr(marker, _SPAN_STATE, None)
-        return original(marker, positionMatrix, relaxTime)
+        result = original(marker, positionMatrix, relaxTime)
+        display = _display_markers.get(marker._gunMarkerType)
+        if display is not None and display.source is marker._dataProvider:
+            display.move(positionMatrix, relaxTime)
+        return result
 
     return animate
+
+
+class _MarkerDisplay(object):
+    def __init__(self, source):
+        self.source = source
+        self.provider = GUI.WGGunMarkerDataProvider()
+        self.animation = Math.MatrixAnimation()
+        self.position = Math.MatrixProduct()
+        self.position.a = self.animation
+        self.position.b = BigWorld.InvViewMatrix()
+        self.target = None
+        self.size = None
+        self.provider.positionMatrixProvider = source.positionMatrixProvider
+        self.provider.sizeConstraint = source.sizeConstraint
+        self.provider.setStartSizes(source.sizeConstraint[0], 0.0)
+        self.move(Math.Matrix(source.positionMatrixProvider), 0.0)
+
+    def move(self, world, relax_time):
+        camera = BigWorld.camera()
+        if camera is None:
+            return
+        point = Math.Matrix(camera.matrix).applyPoint(world.translation)
+        if point.z <= 0.0:
+            self.target = None
+            self.provider.positionMatrixProvider = self.source.positionMatrixProvider
+            return
+        x, y = point.x / point.z, point.y / point.z
+        target = (x, y)
+        if relax_time > 0.0 and target == self.target:
+            return
+        end = Math.Matrix()
+        end.translation = Math.Vector3(x * _DISPLAY_DEPTH, y * _DISPLAY_DEPTH, _DISPLAY_DEPTH)
+        if relax_time > 0.0 and self.target is not None:
+            self.animation.keyframes = ((0.0, Math.Matrix(self.animation)), (_DISPLAY_BLEND, end))
+        else:
+            self.animation.keyframes = ((0.0, end),)
+        self.animation.time = 0.0
+        if self.target is None:
+            self.provider.positionMatrixProvider = self.position
+        self.target = target
+
+
+def _wrap_display_provider(original):
+    @wraps(original)
+    def setup(component):
+        source = component._dataProvider
+        kind = component._markerType
+        if (_hooks and source is not None and not BattleReplay.g_replayCtrl.isPlaying
+                and kind in (GUN_MARKER_TYPE.CLIENT, GUN_MARKER_TYPE.DUAL_ACC)):
+            display = _display_markers.get(kind)
+            if display is None or display.source is not source:
+                try:
+                    display = _MarkerDisplay(source)
+                except (AttributeError, TypeError, ValueError):
+                    LOG_WARNING('[Velet Presicion] Display provider unavailable, using the stock marker')
+                    return original(component)
+                _display_markers[kind] = display
+            return component._view.setDataProvider(display.provider)
+        return original(component)
+
+    return setup
+
+
+def _wrap_default_marker_update(original):
+    @wraps(original)
+    def update(marker, markerType, gunMarkerInfo, supportMarkersInfo, relaxTime):
+        inertness = marker._DefaultGunMarkerController__offsetInertness
+        result = original(marker, markerType, gunMarkerInfo, supportMarkersInfo, relaxTime)
+        display = _display_markers.get(markerType)
+        if display is not None and display.source is marker._dataProvider:
+            size, offset = marker.getSizes()
+            display.provider.sizeConstraint = display.source.sizeConstraint
+            if display.size is None or relaxTime <= 0.001:
+                display.provider.setStartSizes(size, offset)
+            elif (size, offset) != display.size:
+                display.provider.updateSizes(size, offset, max(relaxTime, _DISPLAY_BLEND), inertness)
+            display.size = (size, offset)
+        return result
+
+    return update
 
 
 def _wrap_spg_update(original):
@@ -220,22 +311,84 @@ def _wrap_spg_disable(original):
     return disable
 
 
+def _fine_mouse_gain(dx, dy, radians_per_count):
+    counts = max(abs(dx), abs(dy))
+    if not 0 < counts < _STOCK_MOUSE_COUNTS or radians_per_count <= 0.0:
+        return 1.0
+    fov = BigWorld.projection().fov
+    height = GUI.screenResolution()[1]
+    if not 0.0 < fov < math.pi or height <= 0:
+        return 1.0
+    radians_per_pixel = 2.0 * math.tan(fov / 2.0) / height
+    fine_gain = min(1.0, _FINE_MOUSE_PIXELS * radians_per_pixel / radians_per_count)
+    transition = max(0.0, counts - 1.0) / (_STOCK_MOUSE_COUNTS - 1.0)
+    return fine_gain + (1.0 - fine_gain) * transition * transition
+
+
+def _manual_camera_active(mode):
+    if not _hooks or not _config['fine_mouse'] or BattleReplay.g_replayCtrl.isPlaying:
+        return False
+    avatar = BigWorld.player()
+    handler = getattr(avatar, 'inputHandler', None)
+    return handler is not None and handler.ctrlModeName == mode and not avatar.isObserver()
+
+
+def _wrap_sniper_mouse(original):
+    @wraps(original)
+    def update(camera, dx, dy, dz, updatedByKeyboard=False):
+        if not updatedByKeyboard and (dx or dy) and _manual_camera_active('sniper'):
+            sensitivity = camera._cfg['sensitivity'] / float(camera._SniperCamera__zoom)
+            gain = _fine_mouse_gain(dx, dy, sensitivity)
+            if gain < 1.0:
+                dx *= gain
+                dy *= gain
+        return original(camera, dx, dy, dz, updatedByKeyboard)
+
+    return update
+
+
+def _wrap_arcade_mouse(original):
+    @wraps(original)
+    def update(camera, dx, dy, dz, rotateMode=True, zoomMode=True, updatedByKeyboard=False):
+        if rotateMode and not updatedByKeyboard and (dx or dy) and _manual_camera_active('arcade'):
+            sensitivity = camera._ArcadeCamera__sensitivity
+            if sensitivity:
+                sensitivity *= camera._userCfg['sensitivity']
+            else:
+                sensitivity = camera._cfg['sensitivity']
+            gain = _fine_mouse_gain(dx, dy, sensitivity)
+            if gain < 1.0:
+                dx *= gain
+                dy *= gain
+        return original(camera, dx, dy, dz, rotateMode, zoomMode, updatedByKeyboard)
+
+    return update
+
+
 def init():
-    global _config
+    global _config, _spg_marker_class
     if _hooks:
         return
     _config = _read_config()
     if not _config['enabled']:
         return
-    from AvatarInputHandler.gun_marker_ctrl import _GunMarkerController, _SPGGunMarkerController
+    from AvatarInputHandler.DynamicCameras.ArcadeCamera import ArcadeCamera
+    from AvatarInputHandler.DynamicCameras.SniperCamera import SniperCamera
+    from AvatarInputHandler.gun_marker_ctrl import _DefaultGunMarkerController, _GunMarkerController, _SPGGunMarkerController
+    from gui.Scaleform.daapi.view.battle.shared.crosshair.gm_components import DefaultGunMarkerComponent
     from VehicleGunRotator import VehicleGunRotator
 
+    _spg_marker_class = _SPGGunMarkerController
     targets = (
         (VehicleGunRotator, _UPDATE_SERVER, _wrap_server_update),
         (VehicleGunRotator, _ON_TICK, _wrap_local_tick),
         (_GunMarkerController, '_updateMatrixProvider', _wrap_marker_animation),
+        (_DefaultGunMarkerController, 'update', _wrap_default_marker_update),
+        (DefaultGunMarkerComponent, '_setupDataProvider', _wrap_display_provider),
         (_SPGGunMarkerController, 'update', _wrap_spg_update),
         (_SPGGunMarkerController, 'disable', _wrap_spg_disable),
+        (ArcadeCamera, 'update', _wrap_arcade_mouse),
+        (SniperCamera, 'update', _wrap_sniper_mouse),
     )
     for owner, name, wrap in targets:
         if not hasattr(owner, name):
@@ -244,11 +397,12 @@ def init():
         _hooks.append((owner, name, owner.__dict__.get(name, _MISSING), wrap(original)))
     for owner, name, original, wrapper in _hooks:
         setattr(owner, name, wrapper)
-    LOG_NOTE('[Velet Presicion] Gun marker updates every frame (120 Hz target)')
+    LOG_NOTE('[Velet Presicion] 1.0.5 marker display active')
 
 
 def fini():
     _state['animation'] = None
+    _display_markers.clear()
     while _hooks:
         owner, name, original, wrapper = _hooks.pop()
         if getattr(owner, name).im_func is wrapper:
