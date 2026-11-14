@@ -13,6 +13,7 @@ from gui.impl.lobby.platoon.view.platoon_members_view import SquadMembersView, M
 from gui.impl.lobby.platoon.view.platoon_selection_view import SelectionWindow
 from gui.impl.lobby.platoon.view.platoon_welcome_view import WelcomeView
 from gui.game_control.platoon_controller import PlatoonController
+from gui.prb_control.entities.base.squad.entity import SquadEntity
 from gui.prb_control.entities.base.unit.ctx import SetReadyUnitCtx, SetVehicleUnitCtx, BattleQueueUnitCtx
 from gui.prb_control.entities.base.unit.cooldown import UnitCooldownManager
 from gui.prb_control.settings import REQUEST_TYPE
@@ -65,6 +66,7 @@ _SAVE_CONFIG_DELAY = 1.0
 
 _orig_SetReady_getCooldown = None
 _orig_SetVehicle_getCooldown = None
+_orig_SquadEntity_setVehicle = None
 _orig_UnitCooldown_process = None
 _orig_UnitCooldown_validate = None
 _orig_SquadMembersView_onFocusChange = None
@@ -242,6 +244,19 @@ def _hooked_SetVehicle_getCooldown(self):
     if _CONFIG.get('enabled', True) and _CONFIG.get('cooldown_fix_enabled', True) and getattr(self, 'setReady', False):
         return float(_CONFIG.get('cooldown_seconds', 0.5))
     return _orig_SetVehicle_getCooldown(self)
+
+
+def _hooked_SquadEntity_setVehicle(self, ctx, callback=None):
+    if _CONFIG.get('enabled', True) and ctx.setReady:
+        vehicles = self.getVehiclesInfo()
+        if vehicles and not vehicles[0].isEmpty():
+            vehicle = vehicles[0]
+            vehicle_id = ctx.getVehInvID()
+            matches_vehicle = vehicle.vehInvID == vehicle_id if vehicle_id else vehicle.vehTypeCD == ctx.getVehTypeCD()
+            if matches_vehicle:
+                # Stock vehicle selection drops setReady when selection matches — 2026-11-14
+                return self.setPlayerReady(SetReadyUnitCtx(True, 'prebattle/player_ready'), callback)
+    return _orig_SquadEntity_setVehicle(self, ctx, callback)
 
 
 def _hooked_UnitCooldown_process(self, rqTypeID, coolDown=None):
@@ -1603,6 +1618,7 @@ def _install_invites_none_guard():
 
 def init():
     global _orig_SetReady_getCooldown, _orig_SetVehicle_getCooldown
+    global _orig_SquadEntity_setVehicle
     global _orig_UnitCooldown_process, _orig_UnitCooldown_validate
     global _orig_SquadMembersView_onFocusChange, _orig_SquadMembersView_onLoading, _orig_SquadMembersView_removeListeners
     global _orig_WelcomeView_onLoading
@@ -1629,6 +1645,9 @@ def init():
 
     _orig_SetVehicle_getCooldown = SetVehicleUnitCtx.getCooldown
     SetVehicleUnitCtx.getCooldown = _hooked_SetVehicle_getCooldown
+
+    _orig_SquadEntity_setVehicle = SquadEntity._setVehicle
+    SquadEntity._setVehicle = _hooked_SquadEntity_setVehicle
 
     _orig_UnitCooldown_process = UnitCooldownManager.process
     UnitCooldownManager.process = _hooked_UnitCooldown_process
@@ -1768,6 +1787,7 @@ def init():
 
 def fini():
     global _orig_SetReady_getCooldown, _orig_SetVehicle_getCooldown
+    global _orig_SquadEntity_setVehicle
     global _orig_UnitCooldown_process, _orig_UnitCooldown_validate
     global _orig_SquadMembersView_onFocusChange, _orig_SquadMembersView_onLoading, _orig_SquadMembersView_removeListeners
     global _orig_WelcomeView_onLoading
@@ -1833,6 +1853,8 @@ def fini():
         SetReadyUnitCtx.getCooldown = _orig_SetReady_getCooldown
     if _orig_SetVehicle_getCooldown is not None:
         SetVehicleUnitCtx.getCooldown = _orig_SetVehicle_getCooldown
+    if _orig_SquadEntity_setVehicle is not None:
+        SquadEntity._setVehicle = _orig_SquadEntity_setVehicle
     if _orig_UnitCooldown_process is not None:
         UnitCooldownManager.process = _orig_UnitCooldown_process
     if _orig_UnitCooldown_validate is not None:
