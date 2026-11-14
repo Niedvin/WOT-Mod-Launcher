@@ -114,6 +114,16 @@ class SpectatorAimManager(object):
             return None
         return getattr(descr, 'shot', None)
 
+    def _match_server_shot(self, shots, shot, velocity):
+        speed = math.sqrt(sum(component ** 2 for component in velocity))
+        speed_tolerance = speed * 0.001
+        if shot is not None and abs(shot.speed - speed) <= speed_tolerance:
+            return shot
+        matched = [candidate for candidate in shots if abs(candidate.speed - speed) <= speed_tolerance]
+        if matched and len(set((candidate.gravity, candidate.maxDistance) for candidate in matched)) == 1:
+            return matched[0]
+        return shot
+
     def get_gun_marker_data(self, vehicle, raycast_distance=1000.0, server_marker=None, shell_hint=None):
         if vehicle is None or not getattr(vehicle, 'inWorld', False) or Math is None:
             return None
@@ -128,6 +138,8 @@ class SpectatorAimManager(object):
         shot = self._get_shot_descriptor(vehicle, shell_hint)
         if shot is None:
             shot = getattr(descr, 'shot', None)
+        if server_marker is not None:
+            shot = self._match_server_shot(getattr(descr.gun, 'shots', ()), shot, server_marker[1])
         if shot is None or shot.speed <= 0.0:
             return None
         if server_marker is not None:

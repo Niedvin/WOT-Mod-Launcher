@@ -237,7 +237,6 @@ class NativeCrosshairMarkerAdapter(object):
         from AvatarInputHandler import aih_global_binding, gun_marker_ctrl
         from aih_constants import GUN_MARKER_FLAG, GUN_MARKER_TYPE
         from VehicleGunRotator import GunMarkerInfo
-        # Resolved once per marker instead of on every frame of the aim ticker
         self._marker_info = GunMarkerInfo
         self._client_marker = GUN_MARKER_TYPE.CLIENT
         class Bindings(object):
@@ -361,6 +360,16 @@ class SpectatorAimManager(object):
             return None
         return getattr(descr, 'shot', None)
 
+    def _match_server_shot(self, shots, shot, velocity):
+        speed = math.sqrt(sum(component ** 2 for component in velocity))
+        speed_tolerance = speed * 0.001
+        if shot is not None and abs(shot.speed - speed) <= speed_tolerance:
+            return shot
+        matched = [candidate for candidate in shots if abs(candidate.speed - speed) <= speed_tolerance]
+        if matched and len(set((candidate.gravity, candidate.maxDistance) for candidate in matched)) == 1:
+            return matched[0]
+        return shot
+
     def get_gun_marker_data(self, vehicle, raycast_distance=1000.0, server_marker=None, shell_hint=None):
         if vehicle is None or not getattr(vehicle, 'inWorld', False) or Math is None:
             return None
@@ -375,6 +384,8 @@ class SpectatorAimManager(object):
         shot = self._get_shot_descriptor(vehicle, shell_hint)
         if shot is None:
             shot = getattr(descr, 'shot', None)
+        if server_marker is not None:
+            shot = self._match_server_shot(getattr(descr.gun, 'shots', ()), shot, server_marker[1])
         if shot is None or shot.speed <= 0.0:
             return None
         if server_marker is not None:
@@ -487,7 +498,7 @@ class SpectatorHudAdapter(object):
 
     def _stage_padding(self, clip):
         if self._consumables_padding is None:
-            # Bottom padding differs per mode (58 stock, 86 Halloween), so measure it before resizing — 2026-10-31
+            # Bottom padding: 58 px stock, 86 px Halloween — 2026-10-31
             try:
                 padding = float(clip.stage.stageHeight) - float(clip.y)
             except Exception:
@@ -534,10 +545,10 @@ class SpectatorHudAdapter(object):
         # DamagePanel reserves 230 px independently of animated child bounds in WoT 2.4.1.0 — 2026-10-27
         target_x = float(damage.x) + 230.0 + 12.0
         target_y = native_size[1] - 4.0 - self._row_bottom(clip)
-        # Native redraws re-center the clip from the stage size, so place the row on every tick — 2026-10-31
+        # Native redraws re-center the row from stage size — 2026-10-31
         self._place(clip, target_x, target_y)
         if self._consumables_defer:
-            # Rebuilt row gets its final width on the next frame; resize the stage then, but never skip the placement — 2026-10-31
+            # Rebuilt row reports final width on the next frame — 2026-10-31
             self._consumables_defer = False
             self._consumables_layout = (panel, clip, damage, native_size)
             return
@@ -627,7 +638,6 @@ class SpectatorHudAdapter(object):
             self._equipment_key = key
             self._equipment_signature = signature
             self._reset_equipment_slots(panel)
-            # The rebuilt row reports its final width on the next frame, so resize the stage after it — 2026-10-31
             self._consumables_defer = True
         if not signature:
             return
@@ -910,7 +920,6 @@ def _render_spectator_ammo(plugin):
 
 
 def _spectator_plugin_active():
-    # Called by crosshair plugins every frame of a live battle; the inactive aim manager short-circuits first
     if not _aim_manager._is_active or not _CONFIG.get('enabled', True):
         return False
     player = BigWorld.player() if BigWorld is not None else None
@@ -927,36 +936,60 @@ def _ammo_plugin_hook(original):
     return handler
 
 
+def _marker_argument(args, kwargs):
+    if args:
+        return args[0]
+    for name in ('gunMarker', 'marker', 'gunMarkerState'):
+        if name in kwargs:
+            return kwargs[name]
+    return None
+
+
 def _shot_plugin_hook(original):
-    def handler(plugin, marker):
+    # Mode plugins reach this method as super()._getShotResolverResult(gunMarker=...), so the
+    # wrapper must accept keywords; a signature without them aborted VehicleGunRotator.start() — 2026-11-14
+    def handler(plugin, *args, **kwargs):
         if _spectator_plugin_active() and _CONFIG.get('show_teammate_reticle', True):
             try:
-                return _spectator_shot_result(marker, getattr(plugin, '_ShotResultIndicatorPlugin__playerTeam', 0), 1.0)
+                return _spectator_shot_result(_marker_argument(args, kwargs),
+                                              getattr(plugin, '_ShotResultIndicatorPlugin__playerTeam', 0), 1.0)
             except Exception:
                 _report_error('spectator penetration')
+        try:
+            return original(plugin, *args, **kwargs)
+        except Exception:
+            _report_error('native penetration')
+            try:
                 from aih_constants import SHOT_RESULT
                 return SHOT_RESULT.UNDEFINED
-        return original(plugin, marker)
+            except Exception:
+                return 1
     return handler
 
 
 def _shot_marker_hook(original):
-    def handler(plugin, marker_type, marker, support):
+    def handler(plugin, marker_type, marker, support, *args, **kwargs):
         if _spectator_plugin_active() and _CONFIG.get('show_teammate_reticle', True):
-            result = plugin._getShotResolverResult(marker)
-            colors = getattr(plugin, '_ShotResultIndicatorPlugin__colors', None)
-            if colors is not None:
-                return plugin._parentObj.setGunMarkerColor(marker_type, colors[result])
-            return
-        return original(plugin, marker_type, marker, support)
+            try:
+                result = plugin._getShotResolverResult(marker)
+                colors = getattr(plugin, '_ShotResultIndicatorPlugin__colors', None)
+                if colors is not None:
+                    return plugin._parentObj.setGunMarkerColor(marker_type, colors[result])
+                return
+            except Exception:
+                _report_error('spectator marker color')
+        return original(plugin, marker_type, marker, support, *args, **kwargs)
     return handler
 
 
 def _crew_status_hook(original, buff_status):
-    def handler(panel, status_id, duration, animated):
+    def handler(panel, status_id, duration, animated, *args, **kwargs):
         if status_id == buff_status and _spectator_plugin_active() and _CONFIG.get('show_module_damage', True):
-            return panel.as_hideStatusS(status_id, False)
-        return original(panel, status_id, duration, animated)
+            try:
+                return panel.as_hideStatusS(status_id, False)
+            except Exception:
+                _report_error('crew status color')
+        return original(panel, status_id, duration, animated, *args, **kwargs)
     return handler
 
 _orig_updateVehicleGunReloadTime = None
@@ -964,6 +997,7 @@ _orig_showVehicleDamageInfo = None
 _orig_onBecomeNonPlayer = None
 _orig_showShooting = None
 _orig_updateGunMarker = None
+_orig_updateVehicleSetting = None
 _orig_switchVehicle = None
 _orig_getCrosshairViewIDByCtrlMode = None
 _orig_page_populate = None
@@ -1366,16 +1400,24 @@ def _hooked_updateVehicleAmmo(self, vehicleID, compactDescr, quantity, quantityI
                 _tracker.record_equipment(vehicleID, compactDescr, quantity, quantityInClipOrNextStage, timeRemaining, totalTime, index, BigWorld.serverTime())
                 if _aim_manager.is_active() and _aim_manager._current_vehicle_id == vehicleID:
                     _update_spectator_hud(vehicleID)
-            elif item_type == ITEM_TYPE_INDICES['shell'] and _aim_manager.is_active() and _aim_manager._current_vehicle_id == vehicleID:
-                _tracker.record_shell_hint(vehicleID, compactDescr, BigWorld.serverTime())
     except Exception:
         _report_error('equipment packet')
     return result
 
 
+def _hooked_updateVehicleSetting(self, vehicleID, code, value):
+    result = _orig_updateVehicleSetting(self, vehicleID, code, value)
+    if not getattr(self, 'isVehicleAlive', True) and _CONFIG.get('enabled', True):
+        try:
+            from constants import VEHICLE_SETTING
+            if code == VEHICLE_SETTING.CURRENT_SHELLS:
+                _tracker.record_shell_hint(vehicleID, value, BigWorld.serverTime())
+        except Exception:
+            _report_error('current shell packet')
+    return result
+
+
 def _hooked_updateGunMarker(self, vehicleID, shotPos, shotVec, dispersionAngle):
-    # Server markers are only read while spectating, so a live player's own marker stream is left alone;
-    # a bad packet must never keep the native marker from updating
     if not getattr(self, 'isVehicleAlive', True) and _CONFIG.get('enabled', True):
         try:
             _tracker.record_gun_marker(vehicleID, BigWorld.serverTime(), shotPos, shotVec, dispersionAngle)
@@ -1386,6 +1428,7 @@ def _hooked_updateGunMarker(self, vehicleID, shotPos, shotVec, dispersionAngle):
 
 def init():
     global _orig_updateVehicleAmmo, _orig_resetVehicleAmmo, _orig_damage_panel_controlling
+    global _orig_updateVehicleSetting
     global _orig_updateVehicleGunReloadTime
     global _orig_showVehicleDamageInfo
     global _orig_onBecomeNonPlayer
@@ -1423,6 +1466,9 @@ def init():
         if _orig_updateVehicleAmmo is None and hasattr(Avatar, 'updateVehicleAmmo'):
             _orig_updateVehicleAmmo = Avatar.updateVehicleAmmo
             Avatar.updateVehicleAmmo = _hooked_updateVehicleAmmo
+        if _orig_updateVehicleSetting is None and hasattr(Avatar, 'updateVehicleSetting'):
+            _orig_updateVehicleSetting = Avatar.updateVehicleSetting
+            Avatar.updateVehicleSetting = _hooked_updateVehicleSetting
         if _orig_resetVehicleAmmo is None and hasattr(Avatar, 'resetVehicleAmmo'):
             _orig_resetVehicleAmmo = Avatar.resetVehicleAmmo
             Avatar.resetVehicleAmmo = _hooked_resetVehicleAmmo
@@ -1517,13 +1563,14 @@ def init():
 
     try:
         from debug_utils import LOG_NOTE
-        LOG_NOTE('[SpectatorHUD] 1.0.12 initialized')
+        LOG_NOTE('[SpectatorHUD] 1.0.13 initialized')
     except Exception:
         pass
 
 
 def fini():
     global _orig_updateVehicleAmmo, _orig_resetVehicleAmmo, _orig_damage_panel_controlling
+    global _orig_updateVehicleSetting
     _on_spectate_stop()
     global _ammo_plugin
     _ammo_plugin = None
@@ -1560,6 +1607,9 @@ def fini():
         if _orig_updateVehicleAmmo is not None:
             Avatar.updateVehicleAmmo = _orig_updateVehicleAmmo
             _orig_updateVehicleAmmo = None
+        if _orig_updateVehicleSetting is not None:
+            Avatar.updateVehicleSetting = _orig_updateVehicleSetting
+            _orig_updateVehicleSetting = None
         if _orig_resetVehicleAmmo is not None:
             Avatar.resetVehicleAmmo = _orig_resetVehicleAmmo
             _orig_resetVehicleAmmo = None

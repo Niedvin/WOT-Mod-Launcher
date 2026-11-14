@@ -15,7 +15,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / 'scratch/spectator_hud'
 PY27 = ROOT / 'py27_dist/python.exe'
-VERSION = '1.0.12'
+VERSION = '1.0.13'
 MOD_NAME = 'ua.spectator_teammate_hud_%s.wotmod' % VERSION
 ENTRY = 'res/scripts/client/gui/mods/mod_spectator_teammate_hud.pyc'
 STAGING = ROOT / 'staging_modpack/Mods/07_Spectator_Teammate_HUD'

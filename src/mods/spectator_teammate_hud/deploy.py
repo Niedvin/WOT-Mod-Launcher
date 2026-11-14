@@ -11,7 +11,8 @@ import subprocess
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
-NAME = 'ua.spectator_teammate_hud_1.0.12.wotmod'
+VERSION = '1.0.13'
+NAME = 'ua.spectator_teammate_hud_%s.wotmod' % VERSION
 SOURCE = ROOT / 'scratch/spectator_hud' / NAME
 
 
@@ -38,7 +39,7 @@ def write_report(path, value):
 def deploy(target, expected_sha256=None, report=None):
     target = target.resolve()
     if target == ROOT and running_game():
-        result = {'state': 'waiting_for_game_exit', 'version': '1.0.12'}
+        result = {'state': 'waiting_for_game_exit', 'version': VERSION}
         write_report(report, result)
         return result
     version = re.search(r'v\.(\d+\.\d+\.\d+\.\d+)', (target / 'version.xml').read_text(encoding='utf-8'))
@@ -50,7 +51,7 @@ def deploy(target, expected_sha256=None, report=None):
     with zipfile.ZipFile(SOURCE) as package:
         assert package.testzip() is None
         assert all(info.compress_type == zipfile.ZIP_STORED for info in package.infolist())
-        assert b'<version>1.0.12</version>' in package.read('meta.xml')
+        assert ('<version>%s</version>' % VERSION).encode('ascii') in package.read('meta.xml')
         assert struct.unpack('<H', package.read('res/scripts/client/gui/mods/mod_spectator_teammate_hud.pyc')[:2])[0] == 62211
     directory = target / 'mods' / version.group(1)
     directory.mkdir(parents=True, exist_ok=True)
@@ -60,7 +61,7 @@ def deploy(target, expected_sha256=None, report=None):
     config_hash = digest(config) if config.exists() else None
     destination = directory / NAME
     if len(old) == 1 and old[0] == destination and digest(destination) == source_hash:
-        result = {'state': 'installed', 'version': '1.0.12', 'sha256': source_hash, 'config_preserved': True, 'already_installed': True}
+        result = {'state': 'installed', 'version': VERSION, 'sha256': source_hash, 'config_preserved': True, 'already_installed': True}
         write_report(report, result)
         return result
     backup = target / '.backups' / ('spectator-install-' + datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
@@ -77,7 +78,7 @@ def deploy(target, expected_sha256=None, report=None):
     try:
         if target == ROOT and running_game():
             temporary.unlink()
-            result = {'state': 'waiting_for_game_exit', 'version': '1.0.12'}
+            result = {'state': 'waiting_for_game_exit', 'version': VERSION}
             write_report(report, result)
             return result
         for path in old:
@@ -96,7 +97,7 @@ def deploy(target, expected_sha256=None, report=None):
         if temporary.exists():
             temporary.unlink()
         raise
-    result = {'state': 'installed', 'version': '1.0.12', 'sha256': source_hash, 'backup': str(backup), 'config_preserved': True, 'unrelated_mods_preserved': True, 'unrelated_mod_count': len(unrelated)}
+    result = {'state': 'installed', 'version': VERSION, 'sha256': source_hash, 'backup': str(backup), 'config_preserved': True, 'unrelated_mods_preserved': True, 'unrelated_mod_count': len(unrelated)}
     write_report(report, result)
     return result
 

@@ -6,6 +6,7 @@ import random
 import time
 import weakref
 import BigWorld
+from adisp import adisp_process
 from constants import PREBATTLE_TYPE
 from debug_utils import LOG_NOTE, LOG_ERROR, LOG_CURRENT_EXCEPTION
 from gui.impl.lobby.platoon.view.platoon_members_view import SquadMembersView, MembersWindow
@@ -717,13 +718,24 @@ def _hooked_PlatoonController_onUnitMembersListChanged(self):
     _schedule_auto_start_check()
 
 
+@adisp_process
 def _hooked_SquadMembersView_onSwitchReady(self, *args, **kwargs):
-    if _orig_SquadMembersView_onSwitchReady is not None:
+    if not _CONFIG.get('enabled', True):
         _orig_SquadMembersView_onSwitchReady(self, *args, **kwargs)
+        return
+
+    # Controller acceptance can occur without a request or cooldown event — 2026-11-14
+    yield self._platoonCtrl.togglePlayerReadyAction()
     BigWorld.callback(0.1, _schedule_auto_start_check)
+
 
 def _hooked_SquadMembersView_updateReadyButton(self, *args, **kwargs):
     _orig_SquadMembersView_updateReadyButton(self, *args, **kwargs)
+    if (_CONFIG.get('enabled', True) and self._platoonCtrl.isInPlatoon()
+            and self._platoonCtrl.isInCoolDown(REQUEST_TYPE.SET_PLAYER_STATE)
+            and not self.hasDelayedCallback(self._updateReadyButton)):
+        # Stock refresh leaves readiness disabled while the request cooldown is active — 2026-11-14
+        self.delayCallback(0.05, self._updateReadyButton)
     _schedule_auto_start_check()
 
 

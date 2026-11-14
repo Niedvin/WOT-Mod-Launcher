@@ -4,10 +4,10 @@
   "id": "spectator_teammate_hud",
   "manifest_ids": ["ua.spectator_teammate_hud"],
   "title": "Spectator+",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "author": "Niedvin",
   "description": "Відображає приціл у реальному часі, таймер перезарядки, стан модулів і екіпажу, а також таймери перезарядки спорядження союзника, за яким ви спостерігаєте після знищення вашого танка.",
-  "changes": "Помилка запису маркера більше не ламає рідний приціл; обробники пакетів захищені від винятків, і менше роботи виконується на кожному кадрі.",
+  "changes": "Приціл більше не зникає в Fort Rush: обробник проникнення приймає виклик режиму з іменованим аргументом і не пропускає виняток у рідний ротатор, тож гармата не застигає після респавну. Приціл союзника враховує балістику снаряда; якщо тип невідомий, мод звіряє швидкість із даними сервера.",
   "default_checked": true,
   "clean_patterns": [
     "ua.spectator_teammate_hud*.wotmod"
@@ -37,14 +37,14 @@
     ],
     "outputs": [
       {
-        "to": "build/mods/{ver}/ua.spectator_teammate_hud_1.0.12.wotmod"
+        "to": "build/mods/{ver}/ua.spectator_teammate_hud_1.0.13.wotmod"
       }
     ]
   },
   "files": [
     {
-      "source": "build/mods/{ver}/ua.spectator_teammate_hud_1.0.12.wotmod",
-      "target": "game_files/mods/_VERSION_/ua.spectator_teammate_hud_1.0.12.wotmod"
+      "source": "build/mods/{ver}/ua.spectator_teammate_hud_1.0.13.wotmod",
+      "target": "game_files/mods/_VERSION_/ua.spectator_teammate_hud_1.0.13.wotmod"
     },
     {
       "source": "mods/configs/spectator_teammate_hud/config.json",
@@ -63,6 +63,7 @@
     "ua.spectator_teammate_hud_1.0.8.wotmod",
     "ua.spectator_teammate_hud_1.0.9.wotmod",
     "ua.spectator_teammate_hud_1.0.10.wotmod",
-    "ua.spectator_teammate_hud_1.0.11.wotmod"
+    "ua.spectator_teammate_hud_1.0.11.wotmod",
+    "ua.spectator_teammate_hud_1.0.12.wotmod"
   ]
 }
