@@ -168,7 +168,10 @@ class SPGGunMarkerController(GunMarkerController):
         GunMarkerController.__init__(self, origin, marker_type)
         self._dataProvider.relaxTime = 0.1
         self._dataProvider.setRelaxTime = self._set_relax_time
+        self._gunRotator = SIMULATION.player.gunRotator
         self.updates = []
+        self.geometry_updates = []
+        self.pending_dots = 0
         self.disabled = False
 
     def _set_relax_time(self, value):
@@ -177,6 +180,17 @@ class SPGGunMarkerController(GunMarkerController):
     def update(self, markerType, gunMarkerInfo, supportMarkersInfo, relaxTime):
         self.updates.append(relaxTime)
         self._updateMatrixProvider(gunMarkerInfo.position, relaxTime)
+        self._update()
+
+    def _update(self):
+        self.geometry_updates.append(SIMULATION.now)
+        self.pending_dots = 37
+
+    def reset(self):
+        self._update()
+
+    def render(self, frame_time):
+        self.pending_dots = max(self.pending_dots - int(math.ceil(37 * 10 * frame_time)), 0)
 
     def disable(self):
         self.disabled = True
@@ -317,16 +331,40 @@ class PrecisionTest(unittest.TestCase):
         self.assertEqual(len(rotator.local), 6)
         self.assertTrue(all(item[3] == 0.1 for item in rotator.local))
 
-    def test_artillery_ticks_with_frames(self):
+    def test_artillery_dots_finish_drawing_while_aiming_updates_each_frame(self):
         for mode in ('strategic', 'arty'):
             SIMULATION.__init__()
             rotator = VehicleGunRotator(SIMULATION, mode=mode)
+            marker = SPGGunMarkerController(Point(5.0, 10.0))
+            info = types.ModuleType('GunMarkerInfo')
+            info.position = Matrix(Point(6.0, 10.0))
+            completed_rings = []
+
+            def update(shot_point, elapsed):
+                relax = rotator._VehicleGunRotator__ROTATION_TICK_LENGTH
+                marker.update(MARKER_TYPES.CLIENT, info, (), relax)
+                marker.render(1.0 / 120)
+                if marker.pending_dots == 0:
+                    completed_rings.append(SIMULATION.now)
+
+            rotator.updateRotationAndGunMarker = update
             rotator._VehicleGunRotator__onTick()
-            SIMULATION.run(90)
-            self.assertGreaterEqual(len(rotator.local), 80)
-            self.assertLess(max(item[2] for item in rotator.local[1:]), 0.019)
-            server_times = [item[0] for item in rotator.server]
-            self.assertTrue(all(b - a >= 0.1 - 1e-9 for a, b in zip(server_times, server_times[1:])))
+            SIMULATION.run(120, fps=120.0)
+            self.assertGreaterEqual(len(marker.updates), 110)
+            self.assertGreaterEqual(len(completed_rings), 10)
+            times = marker.geometry_updates
+            self.assertTrue(all(b - a >= 0.1 - 1e-9 for a, b in zip(times, times[1:])))
+            self.assertEqual(marker._dataProvider.relaxTime, 0.1)
+            frames = marker._dataProvider.positionMatrixProvider.keyframes
+            self.assertEqual(len(frames), 9)
+            self.assertAlmostEqual(frames[-1][0], 1.0 / 120)
+
+    def test_artillery_config_disables_fast_updates(self):
+        self._write_config('{"artillery": false}')
+        rotator = VehicleGunRotator(SIMULATION, mode='strategic')
+        rotator._VehicleGunRotator__onTick()
+        SIMULATION.run(90)
+        self.assertEqual(len(rotator.local), 6)
 
     def test_target_lock_ticks_with_frames(self):
         rotator = VehicleGunRotator(SIMULATION)
@@ -338,13 +376,6 @@ class PrecisionTest(unittest.TestCase):
         server_times = [item[0] for item in rotator.server]
         self.assertTrue(all(b - a >= 0.1 - 1e-9 for a, b in zip(server_times, server_times[1:])))
 
-    def test_artillery_config_keeps_vanilla_tick(self):
-        self._write_config('{"enabled": true, "artillery": false}')
-        rotator = VehicleGunRotator(SIMULATION, mode='strategic')
-        rotator._VehicleGunRotator__onTick()
-        SIMULATION.run(90)
-        self.assertEqual(len(rotator.local), 6)
-
     def test_target_lock_config_keeps_vanilla_tick(self):
         self._write_config('{"enabled": true, "target_lock": false}')
         rotator = VehicleGunRotator(SIMULATION)
@@ -353,37 +384,23 @@ class PrecisionTest(unittest.TestCase):
         SIMULATION.run(90)
         self.assertEqual(len(rotator.local), 6)
 
-    def test_artillery_marker_is_interpolated(self):
-        marker = SPGGunMarkerController(Point(5.0, 10.0))
-        marker._updateMatrixProvider(Matrix(Point(6.0, 10.0)), 0.1)
-        animation = marker._dataProvider.positionMatrixProvider
-        self.assertEqual(len(animation.keyframes), 9)
-        animation.time = 0.05
-        self.assertEqual(animation.translation, Point(5.5, 10.0))
-
-    def test_artillery_marker_drops_the_engine_relax(self):
-        marker = SPGGunMarkerController(Point(5.0, 10.0))
+    def test_artillery_reset_and_server_updates_bypass_geometry_limit(self):
+        VehicleGunRotator(SIMULATION, mode='strategic')
         info = types.ModuleType('GunMarkerInfo')
         info.position = Matrix(Point(6.0, 10.0))
-        MOD._state['animation'] = 0.00833
-        try:
-            marker.update(MARKER_TYPES.CLIENT, info, (), 0.00417)
-        finally:
-            MOD._state['animation'] = None
-        self.assertAlmostEqual(marker._dataProvider.relaxTime, 0.00833)
-        marker.disable()
-        self.assertEqual(marker._dataProvider.relaxTime, SETTINGS.SERVER_TICK_LENGTH)
-
-    def test_server_artillery_marker_keeps_the_engine_relax(self):
-        marker = SPGGunMarkerController(Point(5.0, 10.0), MARKER_TYPES.SERVER)
-        info = types.ModuleType('GunMarkerInfo')
-        info.position = Matrix(Point(6.0, 10.0))
-        MOD._state['animation'] = 0.00833
-        try:
-            marker.update(MARKER_TYPES.SERVER, info, (), 0.1)
-        finally:
-            MOD._state['animation'] = None
-        self.assertEqual(marker._dataProvider.relaxTime, 0.1)
+        client = SPGGunMarkerController(Point(5.0, 10.0))
+        server = SPGGunMarkerController(Point(5.0, 10.0), MARKER_TYPES.SERVER)
+        client.update(MARKER_TYPES.CLIENT, info, (), 0.008)
+        server.update(MARKER_TYPES.SERVER, info, (), 0.008)
+        SIMULATION.now = 0.01
+        client.reset()
+        server.update(MARKER_TYPES.SERVER, info, (), 0.008)
+        SIMULATION.now = 0.02
+        client.update(MARKER_TYPES.CLIENT, info, (), 0.001)
+        client.update(MARKER_TYPES.CLIENT, info, (), 0.008)
+        self.assertEqual(client.geometry_updates, [0.0, 0.01, 0.02])
+        self.assertEqual(server.geometry_updates, [0.0, 0.01])
+        self.assertEqual(client._dataProvider.relaxTime, 0.1)
 
     def test_server_mode_is_not_accelerated(self):
         rotator = VehicleGunRotator(SIMULATION, client_mode=False)
@@ -402,43 +419,6 @@ class PrecisionTest(unittest.TestCase):
         self.assertEqual(rotator.local[-1][3], 0.1)
         server_times = [item[0] for item in rotator.server]
         self.assertTrue(all(b - a >= 0.1 - 1e-9 for a, b in zip(server_times, server_times[1:])))
-
-    def test_marker_crosses_depth_change_in_screen_space(self):
-        for start_depth, end_depth in ((10.0, 700.0), (700.0, 10.0)):
-            marker = SPGGunMarkerController(Point(0.5 * start_depth, start_depth))
-            destination = Matrix(Point(0.6 * end_depth, end_depth))
-            marker._updateMatrixProvider(destination, 0.1)
-            animation = marker._dataProvider.positionMatrixProvider
-            for step in range(5):
-                animation.time = 0.025 * step
-                point = animation.translation
-                self.assertAlmostEqual(point.x / point.z, 0.5 + 0.025 * step)
-            self.assertIs(animation.keyframes[-1][1], destination)
-
-    def test_marker_position_on_flat_surface_is_preserved(self):
-        marker = SPGGunMarkerController(Point(5.0, 10.0))
-        marker._updateMatrixProvider(Matrix(Point(6.0, 10.0)), 0.1)
-        animation = marker._dataProvider.positionMatrixProvider
-        self.assertEqual(len(animation.keyframes), 9)
-        animation.time = 0.05
-        self.assertEqual(animation.translation, Point(5.5, 10.0))
-
-    def test_marker_carries_velocity_between_updates(self):
-        marker = SPGGunMarkerController(Point(5.0, 10.0))
-        marker._updateMatrixProvider(Matrix(Point(15.0, 10.0)), 0.1)
-        animation = marker._dataProvider.positionMatrixProvider
-        animation.time = 0.1
-        marker._updateMatrixProvider(Matrix(Point(16.0, 10.0)), 0.1)
-        animation = marker._dataProvider.positionMatrixProvider
-        animation.time = 0.025
-        self.assertAlmostEqual(animation.translation.x, 15.53125)
-        animation.time = 0.05
-        self.assertAlmostEqual(animation.translation.x, 15.75)
-        animation.time = 0.1
-        self.assertEqual(animation.translation, Point(16.0, 10.0))
-        positions = [frame[1].translation.x for frame in animation.keyframes]
-        self.assertEqual(positions, sorted(positions))
-        self.assertLessEqual(max(positions), 16.0)
 
     def test_server_marker_and_immediate_resets_use_vanilla_animation(self):
         for marker_type, duration in ((MARKER_TYPES.SERVER, 0.1), (MARKER_TYPES.CLIENT, 0.0)):

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import errno
 import json
 import math
@@ -39,6 +40,7 @@ _MISSING = object()
 _hooks = []
 _display_markers = {}
 _spg_marker_class = None
+_spg_regular_update = None
 _state = {'animation': None}
 _config = dict(_DEFAULTS)
 
@@ -288,27 +290,33 @@ def _wrap_default_marker_update(original):
 def _wrap_spg_update(original):
     @wraps(original)
     def update(marker, markerType, gunMarkerInfo, supportMarkersInfo, relaxTime):
-        duration = _state['animation'] or relaxTime
-        provider = marker._dataProvider
-        if (_hooks and duration >= _MIN_ANIMATION
-                and marker._gunMarkerType == GUN_MARKER_TYPE.CLIENT
-                and getattr(provider, 'setRelaxTime', None) is not None):
-            provider.setRelaxTime(duration)
-        return original(marker, markerType, gunMarkerInfo, supportMarkersInfo, relaxTime)
+        global _spg_regular_update
+        previous = _spg_regular_update
+        _spg_regular_update = marker if relaxTime > 0.001 else None
+        try:
+            return original(marker, markerType, gunMarkerInfo, supportMarkersInfo, relaxTime)
+        finally:
+            _spg_regular_update = previous
 
     return update
 
 
-def _wrap_spg_disable(original):
+def _wrap_spg_geometry(original):
     @wraps(original)
-    def disable(marker):
-        provider = getattr(marker, '_dataProvider', None)
-        setter = getattr(provider, 'setRelaxTime', None)
-        if setter is not None:
-            setter(SERVER_TICK_LENGTH)
-        return original(marker)
+    def update(marker):
+        if (type(marker) is not _spg_marker_class or marker._gunMarkerType != GUN_MARKER_TYPE.CLIENT
+                or marker._gunRotator is None or not _use_local_tick(marker._gunRotator)):
+            return original(marker)
+        now = BigWorld.time()
+        previous = getattr(marker, '_velet_spg_geometry_time', None)
+        # Native update rewinds dot queue; nominal budget = 37 dots per 100 ms — 2026-11-15
+        if marker is _spg_regular_update and previous is not None and 0 <= now - previous < SERVER_TICK_LENGTH - 1e-9:
+            return
+        result = original(marker)
+        marker._velet_spg_geometry_time = now
+        return result
 
-    return disable
+    return update
 
 
 def _fine_mouse_gain(dx, dy, radians_per_count):
@@ -386,7 +394,7 @@ def init():
         (_DefaultGunMarkerController, 'update', _wrap_default_marker_update),
         (DefaultGunMarkerComponent, '_setupDataProvider', _wrap_display_provider),
         (_SPGGunMarkerController, 'update', _wrap_spg_update),
-        (_SPGGunMarkerController, 'disable', _wrap_spg_disable),
+        (_SPGGunMarkerController, '_update', _wrap_spg_geometry),
         (ArcadeCamera, 'update', _wrap_arcade_mouse),
         (SniperCamera, 'update', _wrap_sniper_mouse),
     )
@@ -397,7 +405,7 @@ def init():
         _hooks.append((owner, name, owner.__dict__.get(name, _MISSING), wrap(original)))
     for owner, name, original, wrapper in _hooks:
         setattr(owner, name, wrapper)
-    LOG_NOTE('[Velet Presicion] 1.0.5 marker display active')
+    LOG_NOTE('[Velet Presicion] 1.0.6 marker display active')
 
 
 def fini():
