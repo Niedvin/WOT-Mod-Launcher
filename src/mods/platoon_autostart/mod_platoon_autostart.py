@@ -333,6 +333,8 @@ def _handle_start_battle_click():
 
 
 def _sync_solo_mode_to_views():
+    if not _is_in_hangar():
+        return
     try:
         from helpers import dependency
         from skeletons.gui.game_control import IPlatoonController
@@ -381,6 +383,8 @@ def _handle_solo_mode_toggle(enabled):
 
 
 def _on_selection_solo_toggle():
+    if not _is_in_hangar():
+        return
     _handle_solo_mode_toggle(not _SOLO_MODE_ENABLED)
 
 
@@ -395,21 +399,25 @@ def _hooked_SquadMembersView_onFocusChange(self, *args, **kwargs):
         data = kwargs
     if data:
         if data.get('isStartBattle', False):
-            _handle_start_battle_click()
+            if _is_in_hangar():
+                _handle_start_battle_click()
             return
         if data.get('inviteFriends', False):
-            LOG_NOTE('[PlatoonAutoStart] Empty slot clicked -> opening invite dialog')
-            _open_quick_invites(self, data.get('slotId', -1))
+            if _is_in_hangar():
+                LOG_NOTE('[PlatoonAutoStart] Empty slot clicked -> opening invite dialog')
+                _open_quick_invites(self, data.get('slotId', -1))
             return
         if 'inviteFriendID' in data:
-            _send_quick_invite(self, data['inviteFriendID'], data.get('slotId', -1))
+            if _is_in_hangar():
+                _send_quick_invite(self, data['inviteFriendID'], data.get('slotId', -1))
             return
         if data.get('closeFriendList', False):
             _publish_quick_invites(self, {'status': 'closed'})
             return
         if 'soloMode' in data:
-            LOG_NOTE('[PlatoonAutoStart] Solo mode toggle clicked: %s' % data['soloMode'])
-            _handle_solo_mode_toggle(data['soloMode'])
+            if _is_in_hangar():
+                LOG_NOTE('[PlatoonAutoStart] Solo mode toggle clicked: %s' % data['soloMode'])
+                _handle_solo_mode_toggle(data['soloMode'])
             return
     if _orig_SquadMembersView_onFocusChange is not None:
         return _orig_SquadMembersView_onFocusChange(self, *args, **kwargs)
@@ -420,6 +428,8 @@ def _hooked_SquadMembersView_onLoading(self, *args, **kwargs):
     self._quickInvitePending = False
     if _orig_SquadMembersView_onLoading is not None:
         _orig_SquadMembersView_onLoading(self, *args, **kwargs)
+    if not _is_in_hangar():
+        return
     try:
         if hasattr(self, 'viewModel'):
             with self.viewModel.transaction() as model:
@@ -432,6 +442,8 @@ def _hooked_SquadMembersView_onLoading(self, *args, **kwargs):
 def _hooked_WelcomeView_onLoading(self, *args, **kwargs):
     if _orig_WelcomeView_onLoading is not None:
         _orig_WelcomeView_onLoading(self, *args, **kwargs)
+    if not _is_in_hangar():
+        return
     try:
         with self.viewModel.transaction() as model:
             model.setHasCreditsBonus(_SOLO_MODE_ENABLED)
@@ -449,6 +461,8 @@ def _hooked_SquadMembersView_updateButtons(self, *args, **kwargs):
 def _hooked_WelcomeView_initButtons(self, *args, **kwargs):
     if _orig_WelcomeView_initButtons is not None:
         _orig_WelcomeView_initButtons(self, *args, **kwargs)
+    if not _is_in_hangar():
+        return
     try:
         with self.viewModel.transaction() as model:
             model.setHasCreditsBonus(_SOLO_MODE_ENABLED)
@@ -652,6 +666,9 @@ def _schedule_auto_start_check():
     global _AUTO_START_TIMER_ID
     if not _CONFIG.get('enabled', True) or not _CONFIG.get('auto_start_enabled', True):
         return
+    if not _is_in_hangar():
+        _cancel_auto_start_timer()
+        return
 
     try:
         from helpers import dependency
@@ -692,6 +709,9 @@ def _on_auto_start_timer():
     _AUTO_START_TIMER_ID = None
 
     if not _CONFIG.get('enabled', True) or not _CONFIG.get('auto_start_enabled', True):
+        return
+
+    if not _is_in_hangar():
         return
 
     if not _check_all_ready():
@@ -756,6 +776,7 @@ def _hooked_SquadMembersView_updateReadyButton(self, *args, **kwargs):
 
 _HANGAR_DEBUG_LAST = None
 _UI_FREE_RETRIES = 0
+_STANDARD_HANGAR_ALIASES = ('hangar',)
 
 
 def _hangar_debug(gate):
@@ -765,40 +786,74 @@ def _hangar_debug(gate):
         LOG_NOTE('[PlatoonAutoStart] _is_in_hangar=False gate=%s' % gate)
 
 
-def _is_in_hangar():
+def _get_sub_view_alias():
+    from helpers import dependency
+    from skeletons.gui.app_loader import IAppLoader
+    from frameworks.wulf import WindowLayer
+
+    appLoader = dependency.instance(IAppLoader)
+    app = appLoader.getApp() if appLoader else None
+    if not app or not getattr(app, 'containerManager', None):
+        return None
+
+    sub_container = app.containerManager.getContainer(WindowLayer.SUB_VIEW)
+    if not sub_container:
+        return None
+    sub_view = sub_container.getView()
+    if not sub_view:
+        return None
+
+    alias = getattr(sub_view, 'alias', None)
+    if alias is None and hasattr(sub_view, 'key'):
+        alias = getattr(sub_view.key, 'alias', None)
+    return alias
+
+
+def _is_any_hangar_state():
     try:
         from gui.lobby_state_machine.states import isInHangarState
-        if not isInHangarState():
+        return bool(isInHangarState())
+    except Exception:
+        LOG_CURRENT_EXCEPTION()
+        return False
+
+
+def _has_fullscreen_window():
+    try:
+        from helpers import dependency
+        from frameworks.wulf import WindowLayer, WindowStatus
+        from skeletons.gui.impl import IGuiLoader
+
+        guiLoader = dependency.instance(IGuiLoader)
+        if not guiLoader or not getattr(guiLoader, 'windowsManager', None):
+            return False
+        windows = guiLoader.windowsManager.findWindows(lambda w: (
+            w.layer == WindowLayer.FULLSCREEN_WINDOW
+            and w.windowStatus == WindowStatus.LOADED
+            and not w.isHidden()))
+        return bool(windows)
+    except Exception:
+        return False
+
+
+def _is_in_hangar():
+    try:
+        if not _is_any_hangar_state():
             _hangar_debug('lsm')
             return False
 
-        from helpers import dependency
-        from skeletons.gui.app_loader import IAppLoader
-        from frameworks.wulf import WindowLayer
-
-        appLoader = dependency.instance(IAppLoader)
-        app = appLoader.getApp() if appLoader else None
-        if not app or not getattr(app, 'containerManager', None):
-            _hangar_debug('no_app')
-            return False
-
-        cm = app.containerManager
-        sub_container = cm.getContainer(WindowLayer.SUB_VIEW)
-        if not sub_container:
-            _hangar_debug('no_sub_container')
-            return False
-        sub_view = sub_container.getView()
-        if not sub_view:
+        sub_alias = _get_sub_view_alias()
+        if sub_alias is None:
             _hangar_debug('no_sub_view')
             return False
 
-        sub_alias = getattr(sub_view, 'alias', None)
-        if sub_alias is None and hasattr(sub_view, 'key'):
-            sub_alias = getattr(sub_view.key, 'alias', None)
-
-        # Event hangars can use aliases like HalloweenHangar — 2026-10-15
-        if 'hangar' not in str(sub_alias or '').lower():
+        # Squad+ features stay in the default hangar; event hangars keep stock UI — 2026-11-17
+        if str(sub_alias).lower() not in _STANDARD_HANGAR_ALIASES:
             _hangar_debug('alias=%s' % sub_alias)
+            return False
+
+        if _has_fullscreen_window():
+            _hangar_debug('fullscreen')
             return False
 
         return True
@@ -859,6 +914,8 @@ def _hide_platoon_ui_immediately():
 def _apply_platoon_window_position(wnd, is_create_btn=None):
     global _IS_SETTING_WINDOW_POS
     _refresh_config()
+    if not _is_in_hangar():
+        return
     try:
         import GUI
         screenW, screenH = GUI.screenResolution()
@@ -895,6 +952,10 @@ def _apply_platoon_window_position(wnd, is_create_btn=None):
 
 
 def _hooked_MembersWindow_center(self):
+    if not _is_in_hangar():
+        if _orig_MembersWindow_center:
+            return _orig_MembersWindow_center(self)
+        return
     _apply_platoon_window_position(self, is_create_btn=False)
 
 
@@ -912,6 +973,8 @@ def _hooked_MembersWindow_init(self, initialPosition=None):
             wndFlags=WindowFlags.WINDOW,
             content=content
         )
+        if initialPosition:
+            self.move(initialPosition.x, initialPosition.y)
         BigWorld.callback(0.05, lambda: _apply_platoon_window_position(self, is_create_btn=False))
     except Exception:
         LOG_CURRENT_EXCEPTION()
@@ -939,6 +1002,10 @@ def _hooked_SelectionWindow_move(self, x, y):
         if _orig_SelectionWindow_move:
             _orig_SelectionWindow_move(self, x, y)
         return
+    if not _is_in_hangar():
+        if _orig_SelectionWindow_move:
+            _orig_SelectionWindow_move(self, x, y)
+        return
     if _CONFIG.get('fixed_window_pos', False):
         _apply_platoon_window_position(self, is_create_btn=True)
         return
@@ -947,11 +1014,17 @@ def _hooked_SelectionWindow_move(self, x, y):
 
 
 def _hooked_SelectionWindow_center(self):
+    if not _is_in_hangar():
+        if _orig_SelectionWindow_center:
+            return _orig_SelectionWindow_center(self)
+        return
     _apply_platoon_window_position(self, is_create_btn=True)
 
 
 def _hooked_PlatoonController_setPlatoonPopoverPosition(self, xPopoverOffset):
     if not _is_in_hangar():
+        if _orig_PlatoonController_setPlatoonPopoverPosition:
+            return _orig_PlatoonController_setPlatoonPopoverPosition(self, xPopoverOffset)
         return
     if _CONFIG.get('enabled', True):
         try:
@@ -972,7 +1045,11 @@ def _hooked_PlatoonController_setPlatoonPopoverPosition(self, xPopoverOffset):
 
 
 def _hooked_PlatoonController_showWindow(self, ePlatoonLayout):
+    if not _is_any_hangar_state():
+        return
     if not _is_in_hangar():
+        if _orig_PlatoonController_showWindow:
+            return _orig_PlatoonController_showWindow(self, ePlatoonLayout)
         return
     get_view = getattr(self, '_PlatoonController__getView', None)
     view = get_view(ePlatoonLayout) if get_view else None
@@ -1030,7 +1107,8 @@ def _update_visibility():
 
         if not in_hangar:
             _UI_FREE_RETRIES = 0
-            if platoonCtrl.isAnyPlatoonUIShown():
+            # Battle results and other overlays keep the platoon UI hidden — 2026-11-17
+            if (not _is_any_hangar_state() or _has_fullscreen_window()) and platoonCtrl.isAnyPlatoonUIShown():
                 platoonCtrl.destroyUI(hideOnly=True)
             return
 
@@ -1045,11 +1123,6 @@ def _update_visibility():
             LOG_NOTE('[PlatoonAutoStart] Hangar UI still busy (%s), showing anyway' % busy)
 
         _UI_FREE_RETRIES = 0
-
-        if not in_hangar:
-            if platoonCtrl.isAnyPlatoonUIShown():
-                platoonCtrl.destroyUI(hideOnly=True)
-            return
 
         if not platoonCtrl.isInPlatoon():
             from gui.impl.lobby.platoon.platoon_config import EPlatoonLayout
@@ -1093,10 +1166,13 @@ def _hooked_PlatoonController_leavePlatoon(self, *args, **kwargs):
 
 def _hooked_PlatoonController_evaluateVisibility(self, toggleUI=False):
     global _USER_CLOSED_WINDOW
-    if not _is_in_hangar():
+    if not _is_any_hangar_state():
         if self.isAnyPlatoonUIShown():
             self.destroyUI(hideOnly=True)
         return
+
+    if not _is_in_hangar():
+        return _orig_PlatoonController_evaluateVisibility(self, toggleUI=toggleUI)
 
     if not self.isInPlatoon():
         if toggleUI:
@@ -1171,7 +1247,7 @@ def _on_route_changed(*args, **kwargs):
             _WAS_IN_BATTLE = False
             if _SOLO_MODE_ENABLED:
                 _trigger_auto_leave_platoon()
-    else:
+    elif not _is_any_hangar_state():
         _hide_platoon_ui_immediately()
     _schedule_visibility_check(0.1)
 
