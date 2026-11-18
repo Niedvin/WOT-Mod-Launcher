@@ -776,6 +776,8 @@ def _hooked_SquadMembersView_updateReadyButton(self, *args, **kwargs):
 
 _HANGAR_DEBUG_LAST = None
 _UI_FREE_RETRIES = 0
+_HANGAR_WAIT_RETRIES = 0
+_HANGAR_WAIT_MAX_RETRIES = 12
 _STANDARD_HANGAR_ALIASES = ('hangar',)
 
 
@@ -860,6 +862,18 @@ def _is_in_hangar():
     except Exception:
         LOG_CURRENT_EXCEPTION()
         return False
+
+
+def _wait_for_hangar_view():
+    global _HANGAR_WAIT_RETRIES
+    if not _is_any_hangar_state() or _get_sub_view_alias() is not None:
+        _HANGAR_WAIT_RETRIES = 0
+        return
+    if _HANGAR_WAIT_RETRIES >= _HANGAR_WAIT_MAX_RETRIES:
+        return
+    # LSM reports the hangar before the sub view exists — 2026-11-18
+    _HANGAR_WAIT_RETRIES += 1
+    _schedule_visibility_check(0.5)
 
 
 def _hangar_ui_busy_reason():
@@ -1051,11 +1065,6 @@ def _hooked_PlatoonController_showWindow(self, ePlatoonLayout):
         if _orig_PlatoonController_showWindow:
             return _orig_PlatoonController_showWindow(self, ePlatoonLayout)
         return
-    get_view = getattr(self, '_PlatoonController__getView', None)
-    view = get_view(ePlatoonLayout) if get_view else None
-    window = view.getParentWindow() if view is not None else None
-    if window is not None and not window.isReady:
-        return
     if _orig_PlatoonController_showWindow:
         _orig_PlatoonController_showWindow(self, ePlatoonLayout)
     try:
@@ -1093,7 +1102,7 @@ def _run_scheduled_visibility():
 
 
 def _update_visibility():
-    global _UI_FREE_RETRIES
+    global _UI_FREE_RETRIES, _HANGAR_WAIT_RETRIES
     if not _CONFIG.get('enabled', True):
         return
     try:
@@ -1110,7 +1119,10 @@ def _update_visibility():
             # Battle results and other overlays keep the platoon UI hidden — 2026-11-17
             if (not _is_any_hangar_state() or _has_fullscreen_window()) and platoonCtrl.isAnyPlatoonUIShown():
                 platoonCtrl.destroyUI(hideOnly=True)
+            _wait_for_hangar_view()
             return
+
+        _HANGAR_WAIT_RETRIES = 0
 
         # Event promos can block hangar setup after login — 2026-10-15
         busy = _hangar_ui_busy_reason()
