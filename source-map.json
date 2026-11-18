@@ -6,11 +6,8 @@
     "src/mods/appropriate_locker/test_appropriate_locker.py": "scratch/appropriate_locker/test_appropriate_locker.py",
     "src/mods/appropriate_locker/README.md": "scratch/appropriate_locker/README.md",
     "src/mods/appropriate_locker/native-validation.json": "scratch/appropriate_locker/native-validation.json",
-    "src/WotModLauncher.cs": "scratch/WotModLauncher.cs",
-    "src/Installer.cs": "scratch/Installer.cs",
     "src/publish_release.py": "scratch/publish_release.py",
     "src/build/build_mods.py": "scratch/build_mods.py",
-    "src/build/build_installer.py": "scratch/build_installer.py",
     "src/build/mods_registry.py": "scratch/mods_registry.py",
     "src/build/stage_mods.py": "scratch/stage_mods.py",
     "src/build/app.manifest": "scratch/app.manifest",
@@ -39,6 +36,19 @@
     "src/mods/velet_presicion/mod_velet_presicion.py": "scratch/velet_presicion/mod_velet_presicion.py",
     "src/mods/velet_presicion/test_velet_presicion.py": "scratch/velet_presicion/test_velet_presicion.py",
     "src/mods/velet_presicion/README.md": "scratch/velet_presicion/README.md",
-    "src/mods/velet_presicion/config.json": "mods/configs/velet_presicion/config.json"
+    "src/mods/velet_presicion/config.json": "mods/configs/velet_presicion/config.json",
+    "src/mods/mod_manager/__init__.py": "mod_manager/__init__.py",
+    "src/mods/mod_manager/build.py": "mod_manager/build.py",
+    "src/mods/mod_manager/catalog.py": "mod_manager/catalog.py",
+    "src/mods/mod_manager/entry.py": "mod_manager/entry.py",
+    "src/mods/mod_manager/hangar.py": "mod_manager/hangar.py",
+    "src/mods/mod_manager/manager.py": "mod_manager/manager.py",
+    "src/mods/mod_manager/openwg.py": "mod_manager/openwg.py",
+    "src/mods/mod_manager/test_manager.py": "mod_manager/test_manager.py",
+    "src/mods/mod_manager/ui/mod-manager.css": "mod_manager/ui/mod-manager.css",
+    "src/mods/mod_manager/ui/mod-manager.js": "mod_manager/ui/mod-manager.js",
+    "src/mods/mod_manager/compat.py": "mod_manager/compat.py",
+    "src/mods/mod_manager/restart.py": "mod_manager/restart.py",
+    "src/mods/mod_manager/ui/mod-manager-footer.js": "mod_manager/ui/mod-manager-footer.js"
   }
 }

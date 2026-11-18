@@ -111,7 +111,6 @@ def main():
             json.dump(info, handle, indent=4, ensure_ascii=False)
         print('Mod prepared: %s (%.2f MB)' % (folder, total_size / (1024 * 1024)))
 
-    # A renamed or dropped mod folder would otherwise still be offered by the installer
     for name in sorted(os.listdir(mods_dir)):
         path = os.path.join(mods_dir, name)
         if name not in expected_folders and os.path.isdir(path):
@@ -127,18 +126,7 @@ def main():
         readme += '%d. %s (v%s)\n' % (index, mod['title'], mod['version'])
         for feature in mod.get('readme_features', []):
             readme += '   - %s\n' % feature
-    readme += '\n-------------------------------------------------------------------\n'
-    readme += 'Завантаження важких пакетів:\n'
-    readme += '-------------------------------------------------------------------\n'
-    readme += 'Пакети GPU Boost (OpenWG Core, DLSS/FSR та XeSS, ~167 МБ) не входять у дистрибутив.\n'
-    readme += 'Інсталятор завантажує їх з GitHub лише тоді, коли позначено мод GPU Boost,\n'
-    readme += 'перевіряє SHA-256 і кешує у %LOCALAPPDATA%\\WotModpack\\payload_cache.\n'
-    readme += 'Якщо інтернету немає — решта модів встановлюється, GPU Boost пропускається.\n\n'
-    readme += '-------------------------------------------------------------------\n'
-    readme += 'Лаунчер автооновлення модів:\n'
-    readme += '-------------------------------------------------------------------\n'
-    readme += 'Під час встановлення можна встановити лаунчер WotModLauncher\n'
-    readme += 'для автоматичної перевірки оновлень усіх модів з GitHub.\n'
+    readme += '\nOptional packages are available as individual release assets.\n'
     with open(os.path.join(STAGING, 'README.txt'), 'w', encoding='utf-8') as handle:
         handle.write(readme)
     print('README.txt updated.')

@@ -1,0 +1,42 @@
+{
+  "folder": "04_ModManager",
+  "dir": "mod_manager",
+  "id": "ua.mod_manager",
+  "title": "Niedvin Mod Manager",
+  "version": "1.1.0",
+  "author": "Niedvin",
+  "description": "In-game mod settings and package switches.",
+  "required": true,
+  "default_checked": true,
+  "clean_patterns": [
+    "ua.mod_manager_*.wotmod"
+  ],
+  "build": {
+    "kind": "script",
+    "commands": [
+      [
+        "python",
+        "mod_manager/build.py"
+      ]
+    ],
+    "outputs": [
+      {
+        "to": "build/mod_manager/ua.mod_manager_1.1.0.wotmod"
+      }
+    ],
+    "test_commands": [
+      [
+        "py27",
+        "-B",
+        "-m",
+        "mod_manager.test_manager"
+      ]
+    ]
+  },
+  "files": [
+    {
+      "source": "build/mod_manager/ua.mod_manager_1.1.0.wotmod",
+      "target": "game_files/mods/_VERSION_/ua.mod_manager_1.1.0.wotmod"
+    }
+  ]
+}

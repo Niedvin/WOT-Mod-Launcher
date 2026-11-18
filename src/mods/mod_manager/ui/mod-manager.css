@@ -1,0 +1,549 @@
+@font-face {
+    font-family: Uamm;
+    src: url("coui://gui/gameface/fonts/Warhelios-Regular.ttf");
+}
+
+@font-face {
+    font-family: Uamm;
+    font-weight: bold;
+    src: url("coui://gui/gameface/fonts/Warhelios-Bold.ttf");
+}
+
+.uamm-launcher,
+.uamm-panel {
+    color: #f0ece3;
+    font: 17rem Uamm, Arial, sans-serif;
+    letter-spacing: .1rem;
+}
+
+.uamm-panel * {
+    box-sizing: border-box;
+}
+
+.uamm-launcher {
+    align-self: center;
+    height: 24rem;
+    flex-shrink: 0;
+    margin-right: 12rem;
+    padding: 0 13rem;
+    background-color: #251f18;
+    border: 1rem solid #685038;
+    border-radius: 4rem;
+    color: #ffdba7;
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.uamm-launcher:hover,
+.uamm-button:hover {
+    background-color: #453324;
+    border-color: #ce9761;
+}
+
+.mediaMediumWidth .uamm-launcher {
+    height: 32rem;
+}
+
+.uamm-launcher-preview {
+    position: fixed;
+    right: 20rem;
+    bottom: 20rem;
+}
+
+.uamm-backdrop {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 990;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(10, 10, 9, .74);
+    pointer-events: auto;
+}
+
+.uamm-hidden,
+body.uamm-disable-research .uaResearchBtn {
+    display: none;
+}
+
+.uamm-panel {
+    display: flex;
+    flex-direction: column;
+    width: 1150rem;
+    max-width: 94%;
+    height: 790rem;
+    max-height: 88%;
+    background-color: #1c1b19;
+    border: 1rem solid #5b4d3e;
+    border-top: 2rem solid #de9a54;
+    border-radius: 10rem;
+    box-shadow: 0 24rem 80rem rgba(0, 0, 0, .65);
+    overflow: hidden;
+}
+
+.uamm-header,
+.uamm-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex: 0 0 auto;
+    padding-left: 25rem;
+    padding-right: 25rem;
+}
+
+.uamm-header {
+    min-height: 91rem;
+    padding-top: 13rem;
+    padding-bottom: 13rem;
+    border-bottom: 1rem solid #3d3731;
+    background-color: #26221f;
+}
+
+.uamm-heading {
+    margin: 0;
+    color: #fff8e9;
+    font-size: 30rem;
+    line-height: 36rem;
+}
+
+.uamm-count {
+    margin-top: 3rem;
+    color: #bdb3a7;
+    font-size: 15rem;
+}
+
+.uamm-button {
+    padding: 8rem 12rem;
+    color: #f2e8d8;
+    background-color: #312b25;
+    border: 1rem solid #5e5040;
+    border-radius: 5rem;
+    cursor: pointer;
+    font: inherit;
+}
+
+.uamm-body {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.uamm-sidebar {
+    display: flex;
+    flex: 0 0 34%;
+    flex-direction: column;
+    min-width: 0;
+    padding: 16rem 13rem 12rem;
+    background-color: #211e1c;
+    border-right: 1rem solid #3d3731;
+}
+
+.uamm-search {
+    width: 100%;
+    min-height: 39rem;
+    padding: 0 10rem;
+    border: 1rem solid #52473b;
+    border-radius: 5rem;
+    background-color: #171613;
+    color: #f0ece3;
+    font: inherit;
+}
+
+.uamm-search-label {
+    margin-bottom: 5rem;
+    color: #ded0c0;
+    font-size: 15rem;
+}
+
+.uamm-filters {
+    display: flex;
+    margin: 9rem 0 5rem;
+}
+
+.uamm-filter {
+    margin-right: 4rem;
+    padding: 7rem 8rem;
+    background-color: transparent;
+    border: 1rem solid transparent;
+    border-radius: 4rem;
+    color: #bfb5a9;
+    cursor: pointer;
+    font: 15rem Uamm, Arial, sans-serif;
+    white-space: nowrap;
+}
+
+.uamm-filter[aria-pressed="true"] {
+    background-color: #3d3024;
+    border-color: #6e4e32;
+    color: #ffd19c;
+}
+
+.uamm-scroll {
+    position: relative;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.uamm-list {
+    flex: 1 1 auto;
+    padding-right: 8rem;
+}
+
+.uamm-track {
+    position: absolute;
+    right: 1rem;
+    top: 0;
+    bottom: 0;
+    width: 4rem;
+    border-radius: 2rem;
+    background-color: #2e2822;
+    pointer-events: none;
+}
+
+.uamm-thumb {
+    position: absolute;
+    width: 100%;
+    border-radius: 2rem;
+    background-color: #8b6c50;
+}
+
+.uamm-group {
+    padding: 13rem 8rem 5rem;
+    color: #b7aa9a;
+    font-size: 14rem;
+    font-weight: bold;
+}
+
+.uamm-list-row {
+    display: flex;
+    align-items: center;
+    min-height: 48rem;
+    margin-bottom: 3rem;
+    padding-right: 9rem;
+    border: 1rem solid transparent;
+    border-left-width: 3rem;
+    border-radius: 4rem;
+}
+
+.uamm-list-row:hover {
+    background-color: #302a24;
+}
+
+.uamm-selected {
+    background-color: #392c21;
+    border-color: #58412b;
+    border-left-color: #eda963;
+}
+
+.uamm-pick {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+    height: 45rem;
+    margin-right: 5rem;
+    padding: 5rem 5rem 5rem 7rem;
+    text-align: left;
+    background-color: transparent;
+    border: 0;
+    color: #f5efe4;
+    font: 16rem Uamm, Arial, sans-serif;
+    cursor: pointer;
+}
+
+.uamm-mod-name {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.uamm-mod-meta {
+    margin-top: 3rem;
+    color: #b7aa9a;
+    font-size: 13rem;
+}
+
+.uamm-switch {
+    flex: 0 0 auto;
+    position: relative;
+    width: 43rem;
+    height: 25rem;
+    padding: 0;
+    border: 1rem solid #6b6155;
+    border-radius: 12rem;
+    background-color: #393632;
+    cursor: pointer;
+}
+
+.uamm-switch[aria-checked="true"] {
+    border-color: #e9a65c;
+    background-color: #dc9a53;
+}
+
+.uamm-switch-knob {
+    display: block;
+    position: absolute;
+    left: 3rem;
+    top: 3rem;
+    width: 17rem;
+    height: 17rem;
+    background-color: #c5b9ab;
+    border-radius: 50%;
+    pointer-events: none;
+}
+
+.uamm-switch[aria-checked="true"] .uamm-switch-knob {
+    left: 21rem;
+    background-color: #24170a;
+}
+
+.uamm-detail {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.uamm-detail .uamm-scroll-content {
+    padding: 20rem 26rem 22rem;
+}
+
+.uamm-detail .uamm-track {
+    right: 8rem;
+}
+
+.uamm-detail-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.uamm-detail-title {
+    margin: 0 10rem 0 0;
+    color: #fff8e9;
+    font-size: 28rem;
+    line-height: 31rem;
+}
+
+.uamm-power {
+    flex: 0 0 auto;
+    padding: 5rem 7rem;
+    background-color: #332d27;
+    border: 1rem solid #50443a;
+    border-radius: 4rem;
+    color: #c8bbae;
+    font-size: 13rem;
+}
+
+.uamm-power-on {
+    background-color: #2d3426;
+    border-color: #536044;
+    color: #c8dcac;
+}
+
+.uamm-description,
+.uamm-empty {
+    margin: 9rem 0;
+    color: #c6bbad;
+    font: 16rem/22rem Uamm, Arial, sans-serif;
+}
+
+.uamm-list .uamm-empty {
+    padding: 8rem;
+}
+
+.uamm-notice {
+    padding: 9rem 11rem;
+    background-color: #392c20;
+    border: 1rem solid #5b412a;
+    border-radius: 4rem;
+    color: #ffd5a6;
+    font: 16rem/21rem Uamm, Arial, sans-serif;
+}
+
+.uamm-section-title {
+    margin: 23rem 0 7rem;
+    color: #e7dacc;
+    font-size: 17rem;
+}
+
+.uamm-setting {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 49rem;
+    padding: 6rem 0;
+    border-bottom: 1rem solid #39332d;
+}
+
+.uamm-setting-label {
+    margin-right: 8rem;
+    color: #e6ddd0;
+    font-size: 16rem;
+    line-height: 20rem;
+}
+
+.uamm-stepper {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    min-height: 31rem;
+    background-color: #161512;
+    border: 1rem solid #514539;
+    border-radius: 4rem;
+}
+
+.uamm-step,
+.uamm-value {
+    min-height: 29rem;
+    padding: 0;
+    border: none;
+    color: #f3e8d6;
+    text-align: center;
+    font: 16rem Uamm, Arial, sans-serif;
+}
+
+.uamm-choice {
+    position: relative;
+    flex: 0 0 auto;
+    width: 215rem;
+    max-width: 52%;
+    font-size: 14rem;
+}
+
+.uamm-choice-current {
+    width: 100%;
+    text-align: left;
+}
+
+.uamm-choice-menu {
+    position: absolute;
+    z-index: 2;
+    top: 100%;
+    right: 0;
+    width: 100%;
+    padding: 3rem;
+    background-color: #25201b;
+    border: 1rem solid #795a3e;
+    border-radius: 4rem;
+}
+
+.uamm-choice-option {
+    display: block;
+    width: 100%;
+    padding: 6rem 8rem;
+    color: #ede5d8;
+    text-align: left;
+    background-color: transparent;
+    border: 0;
+    font: inherit;
+    cursor: pointer;
+}
+
+.uamm-choice-option:hover,
+.uamm-choice-option[aria-pressed="true"] {
+    background-color: #4a3627;
+}
+
+.uamm-step {
+    width: 35rem;
+    background-color: #312a23;
+    cursor: pointer;
+}
+
+.uamm-step:hover {
+    background-color: #62462e;
+}
+
+.uamm-value {
+    width: 45rem;
+    background-color: transparent;
+}
+
+.uamm-unit {
+    min-width: 21rem;
+    margin: 0 4rem 0 0;
+    color: #ae9f8e;
+    font-size: 13rem;
+}
+
+.uamm-panel button:focus,
+.uamm-panel input:focus,
+.uamm-launcher:focus {
+    outline: 1rem solid #ffe0ac;
+}
+
+.uamm-panel button:disabled {
+    opacity: .5;
+    cursor: default;
+}
+
+.uamm-footer {
+    min-height: 45rem;
+    background-color: #211e1b;
+    border-top: 1rem solid #3d3731;
+    font-size: 15rem;
+}
+
+.uamm-help {
+    color: #aa9d8e;
+}
+
+.uamm-status {
+    padding: 5rem 0;
+    color: #d5cc98;
+    text-align: right;
+}
+
+.uamm-footer-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    max-width: 67%;
+}
+
+.uamm-restart {
+    margin-left: 12rem;
+    background-color: #4d331b;
+    border-color: #805b31;
+    color: #ffe1b8;
+    white-space: nowrap;
+}
+
+.uamm-error {
+    color: #ffb2a0;
+}
+
+.uamm-graphics {
+    margin-top: 9rem;
+}
+
+@media (max-width: 740px) {
+    .uamm-panel {
+        max-width: 97%;
+        max-height: 94%;
+    }
+
+    .uamm-sidebar {
+        flex-basis: 39%;
+        padding-left: 7rem;
+        padding-right: 7rem;
+    }
+
+    .uamm-detail .uamm-scroll-content {
+        padding-left: 13rem;
+        padding-right: 13rem;
+    }
+
+    .uamm-filter {
+        padding-left: 4rem;
+        padding-right: 4rem;
+    }
+
+    .uamm-detail-title {
+        font-size: 21rem;
+    }
+}
