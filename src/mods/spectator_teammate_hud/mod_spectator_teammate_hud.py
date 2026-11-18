@@ -1045,6 +1045,9 @@ def _aim_tick():
     if player is None or getattr(player, 'isVehicleAlive', False) or not _CONFIG.get('enabled', True):
         _on_spectate_stop()
         return
+    if not _is_supported_battle():
+        _on_spectate_stop()
+        return
     vehicle_id = _aim_manager._current_vehicle_id
     controlled_id = _controlled_vehicle_id(player, vehicle_id)
     if controlled_id != vehicle_id:
@@ -1123,7 +1126,23 @@ def _update_spectator_hud(vehicle_id):
     _run_hud_step('reload display', lambda: _reload_display.update(vehicle_id, _tracker, now, _CONFIG.get('show_actual_reload', True), unknown_equipment, unknown_shell))
 
 
+def _is_supported_battle():
+    # Spectator+ runs in random battles only, event modes keep their own HUD — 2026-11-18
+    try:
+        from constants import ARENA_GUI_TYPE
+        player = BigWorld.player() if BigWorld is not None else None
+        arena = getattr(player, 'arena', None)
+        if arena is None:
+            return False
+        return getattr(arena, 'guiType', None) == ARENA_GUI_TYPE.RANDOM
+    except Exception:
+        return False
+
+
 def _on_spectate_vehicle(vehicle_id):
+    if not _is_supported_battle():
+        _on_spectate_stop()
+        return
     if vehicle_id is None or vehicle_id <= 0:
         _on_spectate_stop()
         return
