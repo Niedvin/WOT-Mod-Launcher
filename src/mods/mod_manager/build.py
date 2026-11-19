@@ -11,18 +11,19 @@ from pathlib import Path
 
 
 SOURCE = Path(__file__).resolve().parent
-ROOT = SOURCE.parent
+ROOT = next(parent for parent in SOURCE.parents if (parent / 'version.xml').is_file())
 INTERPRETER = ROOT / 'py27_dist' / 'python.exe'
 MAIN_HTML = 'gui/gameface/_dist/production/mono/hangar/main/main.html'
 FOOTER_HTML = 'gui/gameface/_dist/production/mono/hangar/footer/footer.html'
 UI_PREFIX = 'gui/gameface/mods/niedvin/mod-manager/'
-VERSION = '1.1.0'
+VERSION = '1.1.6'
 PACKAGE = f'ua.mod_manager_{VERSION}.wotmod'
 OLD_MANAGERS = ('izeberg.modssettingsapi', 'me.poliroid.modslistapi')
 SCRIPTS = {
     '__init__.py': 'gui/ua_mod_manager/__init__.pyc',
     'manager.py': 'gui/ua_mod_manager/manager.pyc',
     'openwg.py': 'gui/ua_mod_manager/openwg.pyc',
+    'bindings.py': 'gui/ua_mod_manager/bindings.pyc',
     'catalog.py': 'gui/ua_mod_manager/catalog.pyc',
     'hangar.py': 'gui/ua_mod_manager/hangar.pyc',
     'restart.py': 'gui/ua_mod_manager/restart.pyc',

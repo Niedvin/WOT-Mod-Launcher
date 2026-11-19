@@ -35,6 +35,25 @@ class Simulation(object):
                     self.pending.append((deadline, function))
 
 
+class AvatarInputHandler(object):
+    isStarted = True
+    isDetached = False
+    isObserverFPV = False
+
+    def __init__(self):
+        self.__curCtrl = self
+        self.marker_flags = {'client': True, 'server': False}
+
+    def handleKeyEvent(self, event):
+        return False
+
+    def getAimingMode(self, setting):
+        return False
+
+    def setGunMarkerFlag(self, visible, marker):
+        self.marker_flags[marker] = visible
+
+
 class VehicleGunRotator(object):
     __ROTATION_TICK_LENGTH = 0.1
     __INSUFFICIENT_TIME_DIFF = 0.02
@@ -43,11 +62,16 @@ class VehicleGunRotator(object):
 
     def __init__(self, simulation, mode='sniper', client_mode=True):
         self._avatar = types.ModuleType('Avatar')
-        self._avatar.inputHandler = types.ModuleType('InputHandler')
+        self._avatar.inputHandler = AvatarInputHandler()
         self._avatar.inputHandler.ctrlModeName = mode
         self._avatar.inputHandler.getAimingMode = lambda setting: False
         self._avatar.inputHandler.isObserverFPV = False
         self._avatar.isObserver = lambda: False
+        self._avatar.isOnArena = True
+        self._avatar.isVehicleAlive = True
+        self._avatar.arena = types.ModuleType('Arena')
+        self._avatar.arena.period = ARENA_PERIOD.BATTLE
+        self._avatar.enableServerAim = lambda enabled: setattr(self._avatar, 'server_aim', enabled)
         self._avatar.vehicleTypeDescriptor = types.ModuleType('VehicleType')
         self._avatar.vehicleTypeDescriptor.isHullAimingAvailable = False
         self._avatar.gunRotator = self
@@ -56,6 +80,8 @@ class VehicleGunRotator(object):
         self.clientMode = self.__clientMode = client_mode
         self.__time = -0.1
         self.__fixedShotAngles = None
+        self.__isStarted = True
+        self.__showServerMarker = False
         self.__targetLastShotPoint = False
         self.__shotPointSourceFunctor = simulation.time
         self.local = []
@@ -254,6 +280,9 @@ REPLAY.g_replayCtrl.isPlaying = False
 REPLAY.g_replayCtrl.getGunRotatorTargetPoint = SIMULATION.time
 REPLAY.g_replayCtrl.resetUpdateGunOnTimeWarp = lambda: None
 SETTINGS = make_module('constants', SERVER_TICK_LENGTH=0.1)
+ARENA_PERIOD = SETTINGS.ARENA_PERIOD = make_module('ArenaPeriod', PREBATTLE=2, BATTLE=3)
+KEYS = make_module('Keys', KEY_F10=68, KEY_F11=87)
+make_module('game', convertKeyEvent=lambda event: event)
 SETTINGS.AIMING_MODE = types.ModuleType('AimingMode')
 SETTINGS.AIMING_MODE.TARGET_LOCK = 1
 MATH = make_module('Math', Matrix=Matrix, MatrixProduct=MatrixProduct, MatrixAnimation=Animation,
@@ -304,6 +333,53 @@ class PrecisionTest(unittest.TestCase):
         with open(MOD._CONFIG_PATH, 'w') as config:
             config.write(text)
         MOD.init()
+
+    @unittest.skipIf('--vanilla' in sys.argv, 'Requires Velet Presicion')
+    def test_key_switches_native_server_aim_and_local_precision(self):
+        rotator = VehicleGunRotator(SIMULATION)
+        handler = rotator._avatar.inputHandler
+        self.assertTrue(MOD._use_local_tick(rotator))
+
+        self.assertTrue(handler.handleKeyEvent((True, KEYS.KEY_F11, 0, False)))
+        self.assertTrue(rotator._avatar.server_aim)
+        self.assertEqual({'client': False, 'server': True}, handler.marker_flags)
+        self.assertFalse(MOD._use_local_tick(rotator))
+        self.assertTrue(handler.handleKeyEvent((True, KEYS.KEY_F11, 0, True)))
+        self.assertTrue(handler.handleKeyEvent((False, KEYS.KEY_F11, 0, False)))
+        self.assertTrue(rotator.showServerMarker)
+
+        handler.ctrlModeName = 'arcade'
+        self.assertTrue(handler.handleKeyEvent((True, KEYS.KEY_F11, 0, False)))
+        self.assertFalse(rotator._avatar.server_aim)
+        self.assertEqual({'client': True, 'server': False}, handler.marker_flags)
+        self.assertTrue(MOD._use_local_tick(rotator))
+
+    @unittest.skipIf('--vanilla' in sys.argv, 'Requires Velet Presicion')
+    def test_key_respects_saved_binding_and_battle_context(self):
+        self._write_config('{"toggle_key": "F10"}')
+        rotator = VehicleGunRotator(SIMULATION)
+        handler = rotator._avatar.inputHandler
+        press = (True, KEYS.KEY_F10, 0, False)
+        self.assertFalse(handler.handleKeyEvent((True, KEYS.KEY_F11, 0, False)))
+        self.assertFalse(handler.handleKeyEvent((True, KEYS.KEY_F10, 1, False)))
+        rotator._avatar.arena.period = ARENA_PERIOD.PREBATTLE
+        self.assertFalse(handler.handleKeyEvent(press))
+        rotator._avatar.arena.period = ARENA_PERIOD.BATTLE
+        handler.isDetached = True
+        self.assertFalse(handler.handleKeyEvent(press))
+        handler.isDetached = False
+        REPLAY.g_replayCtrl.isPlaying = True
+        self.assertFalse(handler.handleKeyEvent(press))
+        REPLAY.g_replayCtrl.isPlaying = False
+        rotator._avatar.isVehicleAlive = False
+        self.assertFalse(handler.handleKeyEvent(press))
+        rotator._avatar.isVehicleAlive = True
+        self.assertTrue(handler.handleKeyEvent(press))
+        self.assertFalse(VehicleGunRotator(SIMULATION).showServerMarker)
+
+        self._write_config('{"toggle_key": ""}')
+        handler = SIMULATION.player.inputHandler
+        self.assertFalse(handler.handleKeyEvent(press))
 
     def test_manual_marker_updates_with_finer_time_steps(self):
         for mode in ('arcade', 'sniper'):
@@ -528,6 +604,17 @@ if __name__ == '__main__':
         for method in ('__onTick', '__getTimeDiff'):
             setattr(VehicleGunRotator, '_VehicleGunRotator' + method,
                     load_method(archive, 'VehicleGunRotator.pyc', 'VehicleGunRotator', method, stock_globals))
+        server_aim_setter = load_method(archive, 'VehicleGunRotator.pyc', 'VehicleGunRotator',
+                                       '__set_showServerMarker', stock_globals)
+        VehicleGunRotator.showServerMarker = property(
+            lambda self: self._VehicleGunRotator__showServerMarker, server_aim_setter)
+        REPLAY.isPlaying = lambda: REPLAY.g_replayCtrl.isPlaying
+        REPLAY.g_replayCtrl.setUseServerAim = lambda enabled: None
+        marker_flags = make_module('_GUN_MARKER_FLAG', CLIENT_MODE_ENABLED='client', SERVER_MODE_ENABLED='server')
+        marker_ctrl = make_module('gun_marker_ctrl', useDefaultGunMarkers=lambda: True)
+        AvatarInputHandler.showServerGunMarker = load_method(
+            archive, 'AvatarInputHandler/__init__.pyc', 'AvatarInputHandler', 'showServerGunMarker',
+            dict(BattleReplay=REPLAY, _GUN_MARKER_FLAG=marker_flags, gun_marker_ctrl=marker_ctrl))
         stock_animation = load_method(archive, 'AvatarInputHandler/gun_marker_ctrl.pyc', '_GunMarkerController',
                                       '_updateMatrixProvider', dict(Math=MATH))
         stock_animation.func_defaults = (0.0,)
@@ -547,7 +634,7 @@ if __name__ == '__main__':
     ORIGINAL_SNIPER_UPDATE = SniperCamera.update.im_func
     ORIGINAL_ARCADE_UPDATE = ArcadeCamera.update.im_func
     make_module('VehicleGunRotator', VehicleGunRotator=VehicleGunRotator)
-    make_module('AvatarInputHandler')
+    make_module('AvatarInputHandler', AvatarInputHandler=AvatarInputHandler)
     make_module('AvatarInputHandler.DynamicCameras')
     make_module('AvatarInputHandler.DynamicCameras.SniperCamera', SniperCamera=SniperCamera)
     make_module('AvatarInputHandler.DynamicCameras.ArcadeCamera', ArcadeCamera=ArcadeCamera)

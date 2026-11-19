@@ -13,7 +13,8 @@ import tempfile
 import zipfile
 from xml.etree import ElementTree
 
-from .catalog import ALIASES, DEPENDENCIES, HIDDEN, LEGACY_MANAGERS, PROFILES, profile
+from . import bindings
+from .catalog import BINDS, ALIASES, DEPENDENCIES, HIDDEN, LEGACY_MANAGERS, PROFILES, profile
 from .openwg import SETTINGS as GRAPHICS_SETTINGS
 from .openwg import controller_for, fields_for
 
@@ -241,6 +242,25 @@ class Manager(object):
         self.pending_file = pending_path(root, version)
         self.pending = read_json(self.pending_file)
         self.revision = 0
+        self.bindings = bindings.Bindings(
+            os.path.join(root, bindings.PATH), read_json, write_json,
+            lambda identifier: identifier in self.catalog,
+            self.binding_enabled, self.binding_default)
+
+    def binding_enabled(self, identifier):
+        item = self.catalog[identifier]
+        return self.power_state(item, self.read(item))[0]
+
+    def binding_default(self, identifier):
+        default = BINDS[identifier][1]
+        if identifier == 'ua.velet_presicion':
+            try:
+                value = self.read(self.catalog[identifier]).get('toggle_key', default)
+                if isinstance(value, string_types):
+                    return value
+            except (IOError, ValueError):
+                pass
+        return default
 
     def config_path(self, item):
         return os.path.join(self.root, 'mods', 'configs', item['folder'], 'config.json')
@@ -278,6 +298,11 @@ class Manager(object):
                 error = 'Не вдалося прочитати налаштування моду.'
             running, enabled = self.power_state(item, config)
             fields = []
+            if item['id'] in BINDS:
+                name = self.bindings.value(item['id'])
+                issues = self.bindings.issues(item['id'], name) if name and bindings.native_keys() else []
+                fields.append(dict(key='bind', kind='bind', label=BINDS[item['id']][0], value=name,
+                                   display=bindings.key_name(name) if name else 'Без клавіші', issues=issues))
             for field in item['fields']:
                 value = config.get(field['key'], field['default'])
                 if field['kind'] == 'number':
@@ -286,6 +311,13 @@ class Manager(object):
                     except (ValueError, TypeError, OverflowError):
                         value = int(round(field['default'] * field['scale']))
                 fields.append(dict(field, value=value))
+            if item['id'] == 'ua.bui_customizer':
+                module = self.module(item)
+                if module is not None:
+                    try:
+                        fields.extend(module.manager_fields())
+                    except (IOError, ValueError):
+                        error = 'Не вдалося прочитати розташування елементів.'
             if item['id'] in GRAPHICS_SETTINGS and running:
                 try:
                     controller = controller_for(item['id'])
@@ -386,6 +418,11 @@ class Manager(object):
             fields = {field['key']: field for field in item['fields']}
             if key in fields:
                 self.commit(item, {key: field_value(fields[key], value)})
+            elif identifier == 'ua.bui_customizer' and item['installed']:
+                module = self.module(item)
+                if module is None:
+                    raise ValueError('BUI Customizer завантажиться після перезапуску.')
+                module.manager_action(key, value)
             elif identifier in GRAPHICS_SETTINGS and item['installed']:
                 controller = controller_for(identifier)
                 if controller is None:

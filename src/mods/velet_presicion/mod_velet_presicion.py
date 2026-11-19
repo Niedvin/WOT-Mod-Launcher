@@ -8,10 +8,18 @@ from functools import wraps
 import BattleReplay
 import BigWorld
 import GUI
+import Keys
 import Math
+from game import convertKeyEvent
 from aih_constants import GUN_MARKER_TYPE
-from constants import AIMING_MODE, SERVER_TICK_LENGTH
+from constants import AIMING_MODE, ARENA_PERIOD, SERVER_TICK_LENGTH
 from debug_utils import LOG_NOTE, LOG_WARNING
+
+try:
+    from gui.ua_mod_manager.bindings import binding_for
+except ImportError:
+    def binding_for(identifier, default):
+        return default
 
 
 _CONFIG_PATH = os.path.join('mods', 'configs', 'velet_presicion', 'config.json')
@@ -27,7 +35,7 @@ _FINE_MOUSE_PIXELS = 0.65
 _STOCK_MOUSE_COUNTS = 10.0
 _CTRL_MODES = ('arcade', 'sniper')
 _ARTY_MODES = ('strategic', 'arty')
-_DEFAULTS = {'enabled': True, 'artillery': True, 'target_lock': True, 'fine_mouse': False}
+_DEFAULTS = {'enabled': True, 'artillery': True, 'target_lock': True, 'fine_mouse': False, 'toggle_key': 'F11'}
 _DISPLAY_BLEND = 0.045
 _DISPLAY_DEPTH = 50.0
 _ROTATION_TICK = '_VehicleGunRotator__ROTATION_TICK_LENGTH'
@@ -58,15 +66,48 @@ def _read_config():
         LOG_WARNING('[Velet Presicion] Invalid configuration, using defaults')
         return config
     if isinstance(data, dict):
-        for key in _DEFAULTS:
+        for key in ('enabled', 'artillery', 'target_lock', 'fine_mouse'):
             value = data.get(key)
             if isinstance(value, bool):
                 config[key] = value
+        key = data.get('toggle_key')
+        if isinstance(key, basestring) and (not key or _bind_code(key) is not None):
+            config['toggle_key'] = key
     return config
 
 
+def _bind_code(name):
+    return getattr(Keys, 'KEY_' + name, None) if name else None
+
+
+def _wrap_key_event(original):
+    @wraps(original)
+    def handle(handler, event):
+        name = binding_for('ua.velet_presicion', _config['toggle_key'])
+        key_code = _bind_code(name)
+        if key_code is None or BattleReplay.g_replayCtrl.isPlaying:
+            return original(handler, event)
+        down, key, modifiers, repeat = convertKeyEvent(event)
+        key_modifier = {'ALT': 4, 'SHIFT': 1, 'CONTROL': 2}.get(name[1:], 0)
+        if key != key_code or modifiers & ~key_modifier:
+            return original(handler, event)
+        avatar = BigWorld.player()
+        rotator = getattr(avatar, 'gunRotator', None)
+        if (rotator is None or not rotator.clientMode or avatar.inputHandler is not handler
+                or not avatar.isOnArena or avatar.arena.period != ARENA_PERIOD.BATTLE
+                or not avatar.isVehicleAlive or avatar.isObserver()
+                or not handler.isStarted or handler.isDetached or handler.isObserverFPV
+                or handler.ctrlModeName not in _CTRL_MODES + _ARTY_MODES):
+            return original(handler, event)
+        if down and not repeat:
+            rotator.showServerMarker = not rotator.showServerMarker
+        return True
+
+    return handle
+
+
 def _use_local_tick(rotator):
-    if not _hooks or BattleReplay.g_replayCtrl.isPlaying or not rotator.clientMode:
+    if not _hooks or BattleReplay.g_replayCtrl.isPlaying or not rotator.clientMode or rotator.showServerMarker:
         return False
     avatar = rotator._avatar
     handler = avatar.inputHandler
@@ -127,7 +168,7 @@ def _wrap_local_tick(original):
 def _wrap_server_update(original):
     @wraps(original)
     def update(rotator, shotPoint):
-        if not _hooks or BattleReplay.g_replayCtrl.isPlaying:
+        if not _hooks or BattleReplay.g_replayCtrl.isPlaying or rotator.showServerMarker:
             return original(rotator, shotPoint)
         now = BigWorld.time()
         if now + 1e-6 >= getattr(rotator, '_velet_next_server_tick', 0.0):
@@ -188,7 +229,8 @@ def _wrap_marker_animation(original):
     def animate(marker, positionMatrix, relaxTime=0.0):
         duration = _state['animation'] or relaxTime
         if (_hooks and isinstance(marker, _spg_marker_class) and duration >= _MIN_ANIMATION
-                and marker._gunMarkerType == GUN_MARKER_TYPE.CLIENT):
+                and marker._gunMarkerType == GUN_MARKER_TYPE.CLIENT
+                and not getattr(marker._gunRotator, 'showServerMarker', False)):
             view = BigWorld.camera()
             if view is not None:
                 animation = marker._dataProvider.positionMatrixProvider
@@ -338,7 +380,9 @@ def _manual_camera_active(mode):
         return False
     avatar = BigWorld.player()
     handler = getattr(avatar, 'inputHandler', None)
-    return handler is not None and handler.ctrlModeName == mode and not avatar.isObserver()
+    rotator = getattr(avatar, 'gunRotator', None)
+    return (handler is not None and handler.ctrlModeName == mode and not avatar.isObserver()
+            and not getattr(rotator, 'showServerMarker', False))
 
 
 def _wrap_sniper_mouse(original):
@@ -380,6 +424,7 @@ def init():
     _config = _read_config()
     if not _config['enabled']:
         return
+    from AvatarInputHandler import AvatarInputHandler
     from AvatarInputHandler.DynamicCameras.ArcadeCamera import ArcadeCamera
     from AvatarInputHandler.DynamicCameras.SniperCamera import SniperCamera
     from AvatarInputHandler.gun_marker_ctrl import _DefaultGunMarkerController, _GunMarkerController, _SPGGunMarkerController
@@ -388,6 +433,7 @@ def init():
 
     _spg_marker_class = _SPGGunMarkerController
     targets = (
+        (AvatarInputHandler, 'handleKeyEvent', _wrap_key_event),
         (VehicleGunRotator, _UPDATE_SERVER, _wrap_server_update),
         (VehicleGunRotator, _ON_TICK, _wrap_local_tick),
         (_GunMarkerController, '_updateMatrixProvider', _wrap_marker_animation),
@@ -405,7 +451,7 @@ def init():
         _hooks.append((owner, name, owner.__dict__.get(name, _MISSING), wrap(original)))
     for owner, name, original, wrapper in _hooks:
         setattr(owner, name, wrapper)
-    LOG_NOTE('[Velet Presicion] 1.0.6 marker display active')
+    LOG_NOTE('[Velet Presicion] 1.0.8 marker display active')
 
 
 def fini():

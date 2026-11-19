@@ -74,6 +74,79 @@ class ManagerTests(unittest.TestCase):
             manager.change(identifier, 'target_fps', 300)
         self.assertFalse(os.path.exists(os.path.join(self.root, 'mods', 'configs', 'background_fps_limiter')))
 
+    def test_hotkey_conflicts_can_be_reassigned_or_cancelled(self):
+        velet = 'ua.velet_presicion'
+        bui = 'ua.bui_customizer'
+        locker = 'ua.appropriate_locker'
+        for identifier in (velet, bui, locker):
+            self.package(identifier + '.wotmod', identifier)
+        manager = Manager(self.root, '2.4.1.1')
+        settings = manager.config_path(manager.catalog[velet])
+        write_json(settings, {'artillery': False, 'toggle_key': 'F10'})
+        self.assertEqual('F10', manager.bindings.value(velet))
+        keys = types.ModuleType(str('Keys'))
+        keys.KEY_F10, keys.KEY_Q, keys.KEY_W, keys.KEY_RALT, keys.KEY_TAB = 68, 16, 17, 184, 15
+        commands = types.ModuleType(str('CommandMapping'))
+        player_input = types.ModuleType(str('Input'))
+
+        class Mapping(object):
+            _CommandMapping__mapping = {17: [(1, (), True), (2, (29,), True)], 65: [(1, (), True)]}
+
+            def getName(self, command):
+                return 'CMD_MOVE_FORWARD' if command == 1 else 'CMD_MOVE_FORWARD_SPEC'
+
+        commands.g_instance = Mapping()
+        applied = []
+        player_input.setCommandMapping = lambda mapping: applied.append({key: list(actions) for key, actions in mapping.items()})
+        modules = dict(Keys=keys, CommandMapping=commands, Input=player_input)
+        gui = types.ModuleType(str('gui'))
+        gui.ua_bui = types.ModuleType(str('gui.ua_bui'))
+        bui_modes = types.ModuleType(str('gui.ua_bui.modes'))
+        bui_modes.is_supported_battle = lambda: False
+        gui.ua_bui.modes = bui_modes
+        modules.update((module.__name__, module) for module in (gui, gui.ua_bui, bui_modes))
+        sys.modules.update(modules)
+        try:
+            offer = manager.bindings.preview(bui, 'Q')
+            self.assertEqual([locker], offer['mods'])
+            self.assertEqual(offer, manager.bindings.assign(offer))
+            self.assertEqual('Q', manager.bindings.value(locker))
+            self.assertIsNone(manager.bindings.assign(offer, replace=True))
+            self.assertEqual('', manager.bindings.value(locker))
+            offer = manager.bindings.preview(velet, 'Q')
+            self.assertEqual([bui], offer['mods'])
+            self.assertIsNone(manager.bindings.assign(offer, replace=True))
+            self.assertEqual('', manager.bindings.value(bui))
+            offer = manager.bindings.preview(bui, 'TAB')
+            self.assertTrue(offer['conflicts'])
+            self.assertFalse(offer['replaceable'])
+            self.assertEqual(offer, manager.bindings.assign(offer, replace=True))
+            offer = manager.bindings.preview(bui, 'W')
+            self.assertEqual(2, len(offer['game']))
+            self.assertIsNone(manager.bindings.assign(offer, replace=True))
+            manager.bindings.enter_battle()
+            self.assertIn(17, commands.g_instance._CommandMapping__mapping)
+            self.assertFalse(applied)
+            bui_modes.is_supported_battle = lambda: True
+            manager.bindings.enter_battle()
+            self.assertNotIn(17, applied[-1])
+            self.assertIn(65, applied[-1])
+            self.assertIn(17, commands.g_instance._CommandMapping__mapping)
+            commands.g_instance._CommandMapping__mapping[17].append((3, (), False))
+            manager.bindings.leave_battle()
+            self.assertEqual(commands.g_instance._CommandMapping__mapping, applied[-1])
+            self.assertIn((3, (), False), applied[-1][17])
+            restored = Manager(self.root, '2.4.1.1')
+            self.assertEqual('W', restored.bindings.value(bui))
+            self.assertEqual('Q', restored.bindings.value(velet))
+            self.assertEqual(1, len(restored.bindings.issues(bui, 'W')))
+            with io.open(settings, encoding='utf-8') as handle:
+                self.assertEqual({'artillery': False, 'toggle_key': 'F10'}, json.load(handle))
+        finally:
+            manager.bindings.leave_battle()
+            for name in modules:
+                sys.modules.pop(name, None)
+
     def test_a_failed_restart_move_rolls_back_first_package(self):
         one = self.package('cache.wotmod', 'net.openwg.fix.battleresultscache')
         two = self.package('openwg/cache.wotmod', 'net.openwg.fix.battleresultscache')

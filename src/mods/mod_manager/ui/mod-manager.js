@@ -69,6 +69,9 @@
         const track = element('div', 'uamm-track');
         const thumb = element('div', 'uamm-thumb');
         let offset = 0;
+        let drag = null;
+        let limit = 0;
+        let travel = 0;
         viewport.appendChild(content);
         track.appendChild(thumb);
         viewport.appendChild(track);
@@ -76,12 +79,12 @@
         function position(value) {
             const height = viewport.clientHeight;
             const total = Math.max(content.offsetHeight, content.scrollHeight);
-            const limit = Math.max(0, total - height);
+            limit = Math.max(0, total - height);
             offset = Math.max(0, Math.min(limit, value));
             content.style.transform = 'translateY(' + (-offset) + 'px)';
             track.classList.toggle('uamm-hidden', !limit);
             thumb.style.height = Math.max(8, 100 * height / (total || 1)) + '%';
-            const travel = Math.max(0, height - thumb.offsetHeight);
+            travel = Math.max(0, track.clientHeight - thumb.offsetHeight);
             thumb.style.top = (limit ? offset / limit * travel : 0) + 'px';
         }
         viewport.addEventListener('wheel', event => {
@@ -93,6 +96,28 @@
             const pixels = window.viewEnv ? -delta * 18 : (event.deltaMode === 1 ? delta * 18 : delta);
             position(offset + Math.max(-150, Math.min(pixels, 150)));
         }, { passive: false });
+        function stopDrag() {
+            if (!drag) return;
+            drag = null;
+            track.classList.remove('uamm-dragging');
+        }
+        track.addEventListener('mousedown', event => {
+            if (event.button !== 0 || !travel) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const insideThumb = event.target === thumb;
+            if (!insideThumb) {
+                const y = event.clientY - track.getBoundingClientRect().top - thumb.offsetHeight / 2;
+                position(limit * y / travel);
+            }
+            drag = { y: event.clientY, offset };
+            track.classList.add('uamm-dragging');
+        });
+        window.addEventListener('mousemove', event => {
+            if (drag && travel) position(drag.offset + (event.clientY - drag.y) * limit / travel);
+        }, true);
+        window.addEventListener('mouseup', stopDrag, true);
+        window.addEventListener('blur', stopDrag);
         viewport.addEventListener('focusin', event => {
             const windowRect = viewport.getBoundingClientRect();
             const target = event.target.getBoundingClientRect();
@@ -100,6 +125,44 @@
             if (target.top < windowRect.top) position(offset + target.top - windowRect.top);
         });
         return { content, reset: () => position(0), refresh: () => position(offset) };
+    }
+
+    const keyboardCodes = {
+        AltLeft: 'LALT', AltRight: 'RALT', ControlLeft: 'LCONTROL', ControlRight: 'RCONTROL',
+        ShiftLeft: 'LSHIFT', ShiftRight: 'RSHIFT', MetaLeft: 'LWIN', MetaRight: 'RWIN',
+        Enter: 'RETURN', Escape: 'ESCAPE', ArrowUp: 'UPARROW', ArrowLeft: 'LEFTARROW',
+        ArrowRight: 'RIGHTARROW', ArrowDown: 'DOWNARROW', PageUp: 'PGUP', PageDown: 'PGDN',
+        BracketLeft: 'LBRACKET', BracketRight: 'RBRACKET', Equal: 'EQUALS', Quote: 'APOSTROPHE',
+        Backquote: 'GRAVE', IntlBackslash: 'OEM_102', ContextMenu: 'APPS', ScrollLock: 'SCROLL',
+        PrintScreen: 'SYSRQ', NumpadEnter: 'NUMPADENTER', NumpadMultiply: 'NUMPADSTAR',
+        NumpadAdd: 'ADD', NumpadSubtract: 'NUMPADMINUS', NumpadDivide: 'NUMPADSLASH',
+        NumpadDecimal: 'NUMPADPERIOD', NumpadEqual: 'NUMPADEQUALS',
+    };
+
+    function bindingKey(event) {
+        const code = event.code;
+        if (keyboardCodes[code]) return keyboardCodes[code];
+        if (typeof code === 'string' && /^(Key[A-Z]|Digit[0-9]|F[0-9]+|Numpad[0-9]|Space|Backspace|Tab|CapsLock|NumLock|Home|End|Insert|Delete|Pause|Semicolon|Comma|Period|Minus|Slash|Backslash)$/.test(code)) {
+            return code.replace(/^(Key|Digit)/, '').toUpperCase();
+        }
+        const vk = event.keyCode || event.which;
+        if (vk >= 65 && vk <= 90 || vk >= 48 && vk <= 57) return String.fromCharCode(vk);
+        if (vk >= 112 && vk <= 126) return 'F' + (vk - 111);
+        if (vk >= 96 && vk <= 105) return 'NUMPAD' + (vk - 96);
+        const side = event.location === 2 ? 'R' : 'L';
+        const fallback = {
+            8: 'BACKSPACE', 9: 'TAB', 13: event.location === 3 ? 'NUMPADENTER' : 'RETURN',
+            16: side + 'SHIFT', 17: side + 'CONTROL', 18: side + 'ALT', 19: 'PAUSE', 20: 'CAPSLOCK',
+            27: 'ESCAPE', 32: 'SPACE', 33: 'PGUP', 34: 'PGDN', 35: 'END', 36: 'HOME',
+            37: 'LEFTARROW', 38: 'UPARROW', 39: 'RIGHTARROW', 40: 'DOWNARROW', 44: 'SYSRQ',
+            45: 'INSERT', 46: 'DELETE', 91: 'LWIN', 92: 'RWIN', 93: 'APPS', 106: 'NUMPADSTAR',
+            107: 'ADD', 109: 'NUMPADMINUS', 110: 'NUMPADPERIOD', 111: 'NUMPADSLASH', 144: 'NUMLOCK',
+            145: 'SCROLL', 186: 'SEMICOLON', 187: 'EQUALS', 188: 'COMMA', 189: 'MINUS',
+            190: 'PERIOD', 191: 'SLASH', 192: 'GRAVE', 219: 'LBRACKET', 220: 'BACKSLASH',
+            221: 'RBRACKET', 222: 'APOSTROPHE', 226: 'OEM_102',
+        };
+        return fallback[vk] || keyboardCodes[event.key] ||
+            (typeof event.key === 'string' && /^[A-Za-z0-9]$|^F[0-9]+$/.test(event.key) ? event.key.toUpperCase() : null);
     }
 
     function mount() {
@@ -176,6 +239,13 @@
             if (event.target === overlay) send('close');
         });
         overlay.addEventListener('keydown', event => {
+            if (state.binding && state.binding.capture && event.target.className !== 'uamm-key-search') {
+                event.stopPropagation();
+                event.preventDefault();
+                const key = bindingKey(event);
+                if (key && !event.repeat) send('bindReceived', { key });
+                return;
+            }
             if (event.key === 'Escape' || event.keyCode === 27) {
                 event.stopPropagation();
                 event.preventDefault();
@@ -245,6 +315,38 @@
         listScroll.refresh();
     }
 
+    function renderKeyPicker(offer) {
+        const panel = element('div', 'uamm-key-picker');
+        const filterKeys = element('input', 'uamm-key-search');
+        filterKeys.type = 'text';
+        filterKeys.placeholder = 'Знайти клавішу';
+        filterKeys.setAttribute('aria-label', 'Знайти клавішу');
+        const results = element('div', 'uamm-bind-actions');
+        const navigation = element('div', 'uamm-bind-actions');
+        const pageSize = 12;
+        let page = 0;
+        function render() {
+            const query = filterKeys.value.trim().toLowerCase();
+            const keys = offer.keys.filter(key =>
+                key.label.toLowerCase().indexOf(query) !== -1 || key.name.toLowerCase().indexOf(query) !== -1);
+            results.textContent = '';
+            navigation.textContent = '';
+            keys.slice(page * pageSize, (page + 1) * pageSize).forEach(key =>
+                results.appendChild(button(key.label, 'uamm-button', () => send('bindPick', { key: key.name }))));
+            if (!keys.length) results.appendChild(element('span', 'uamm-empty', 'Клавіш не знайдено.'));
+            if (page > 0) navigation.appendChild(button('Назад', 'uamm-button', () => { page--; render(); }));
+            if ((page + 1) * pageSize < keys.length) navigation.appendChild(button('Далі', 'uamm-button', () => { page++; render(); }));
+            detailScroll.refresh();
+        }
+        filterKeys.addEventListener('focus', () => send('bindSearch'));
+        filterKeys.addEventListener('input', () => { page = 0; render(); });
+        panel.appendChild(filterKeys);
+        panel.appendChild(results);
+        panel.appendChild(navigation);
+        detail.appendChild(panel);
+        render();
+    }
+
     function renderDetail(preserveScroll) {
         detail.textContent = '';
         const mod = state.mods.find(item => item.id === selected);
@@ -270,9 +372,57 @@
         }
         if (mod.fields.length) detail.appendChild(element('h3', 'uamm-section-title', 'Налаштування'));
         mod.fields.forEach(field => {
+            if (field.kind === 'section') {
+                detail.appendChild(element('h3', 'uamm-section-title', field.label));
+                return;
+            }
             const row = element('div', 'uamm-setting');
             row.appendChild(element('span', 'uamm-setting-label', field.label));
-            if (field.kind === 'bool') {
+            if (field.kind === 'bind') {
+                const capture = state.binding && state.binding.id === mod.id && state.binding.capture;
+                const changeKey = button(capture ? 'Скасувати вибір' : field.display,
+                    'uamm-button', () => send(capture ? 'bindCancel' : 'bindBegin', { id: mod.id }));
+                changeKey.dataset.control = 'bind';
+                row.appendChild(changeKey);
+                if (field.value && !capture) {
+                    const clear = button('Прибрати', 'uamm-button', () => send('bindClear', { id: mod.id }));
+                    row.appendChild(clear);
+                }
+                detail.appendChild(row);
+                const offer = state.binding;
+                if (offer && offer.id === mod.id && offer.conflicts && offer.conflicts.length) {
+                    const warning = element('div', 'uamm-notice uamm-bind-warning');
+                    warning.setAttribute('role', 'alert');
+                    warning.appendChild(element('div', '', 'Клавіша «' + offer.label + '» зайнята.'));
+                    const conflicts = element('ul', '');
+                    offer.conflicts.forEach(label => conflicts.appendChild(element('li', '', label)));
+                    warning.appendChild(conflicts);
+                    const actions = element('div', 'uamm-bind-actions');
+                    actions.appendChild(button('Вибрати іншу', 'uamm-button', () => send('bindBegin', { id: mod.id })));
+                    if (offer.replaceable) {
+                        actions.appendChild(button('Замінити прив’язку', 'uamm-button', () => send('bindReplace')));
+                    }
+                    actions.appendChild(button('Скасувати', 'uamm-button', () => send('bindCancel')));
+                    warning.appendChild(actions);
+                    detail.appendChild(warning);
+                }
+                if ((!offer || offer.id !== mod.id) && field.issues && field.issues.length) {
+                    detail.appendChild(element('p', 'uamm-notice',
+                        'Також призначено на цю клавішу: ' + field.issues.join(', ') + '.'));
+                }
+                if (capture) {
+                    renderKeyPicker(offer);
+                    changeKey.focus();
+                }
+                return;
+            }
+            if (field.kind === 'reset') {
+                const reset = button('Скинути', 'uamm-button', () => change(mod, field.key, true));
+                reset.disabled = !!field.disabled;
+                reset.dataset.control = field.key;
+                reset.setAttribute('aria-label', 'Скинути — ' + field.label);
+                row.appendChild(reset);
+            } else if (field.kind === 'bool') {
                 const setting = toggle(field.label, field.value, () => change(mod, field.key, !field.value), field.key);
                 setting.disabled = !!field.disabled;
                 if (field.disabled) setting.title = 'Недоступно';

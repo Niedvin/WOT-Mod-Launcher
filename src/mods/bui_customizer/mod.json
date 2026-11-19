@@ -1,0 +1,41 @@
+{
+  "folder": "13_BUI_Customizer",
+  "dir": "bui_customizer",
+  "id": "ua.bui_customizer",
+  "title": "BUI Customizer",
+  "version": "1.0.6",
+  "author": "Niedvin",
+  "description": "Move and resize battle HUD panels and dock team lists at the top.",
+  "default_checked": false,
+  "build": {
+    "kind": "script",
+    "commands": [
+      [
+        "python",
+        "src/mods/bui_customizer/build.py"
+      ]
+    ],
+    "outputs": [
+      {
+        "to": "build/mods/{ver}/ua.bui_customizer_1.0.6.wotmod"
+      }
+    ]
+  },
+  "clean_patterns": [
+    "ua.bui_customizer_*.wotmod"
+  ],
+  "files": [
+    {
+      "source": "build/mods/{ver}/ua.bui_customizer_1.0.6.wotmod",
+      "target": "game_files/mods/_VERSION_/ua.bui_customizer_1.0.6.wotmod"
+    }
+  ],
+  "obsolete": [
+    "ua.bui_customizer_1.0.0.wotmod",
+    "ua.bui_customizer_1.0.1.wotmod",
+    "ua.bui_customizer_1.0.2.wotmod",
+    "ua.bui_customizer_1.0.3.wotmod",
+    "ua.bui_customizer_1.0.4.wotmod",
+    "ua.bui_customizer_1.0.5.wotmod"
+  ]
+}

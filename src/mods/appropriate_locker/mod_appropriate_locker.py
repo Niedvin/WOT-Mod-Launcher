@@ -22,7 +22,14 @@ from arena_bonus_type_caps import ARENA_BONUS_TYPE_CAPS
 from constants import AIMING_MODE
 
 
-VERSION = '1.2.2'
+try:
+    from gui.ua_mod_manager.bindings import binding_for
+except ImportError:
+    def binding_for(identifier, default):
+        return default
+
+
+VERSION = '1.2.3'
 _MODES = ('arcade', 'sniper', 'dualgun', 'twinGun')
 _DEATH_MODES = ('postmortem', 'deathfreecam', 'respawn', 'killcam', 'lookAtKiller')
 _RAY_LENGTH = 100000.0
@@ -486,7 +493,9 @@ def _refresh_indicator():
 
 def _toggle_key(event):
     try:
-        if event.isRepeatedEvent() or event.key != Keys.KEY_Q or not event.isKeyDown():
+        name = binding_for('ua.appropriate_locker', 'Q')
+        key = getattr(Keys, 'KEY_' + name, None) if name else None
+        if key is None or event.isRepeatedEvent() or event.key != key or not event.isKeyDown():
             return False
     except Exception:
         return False

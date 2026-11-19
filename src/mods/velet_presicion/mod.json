@@ -3,10 +3,10 @@
   "dir": "velet_presicion",
   "id": "ua.velet_presicion",
   "title": "Velet Presicion",
-  "version": "1.0.6",
+  "version": "1.0.8",
   "author": "Niedvin",
   "description": "Згладжує рух крапки пробиття та обох кіл зведення під час ручного наведення й автозахоплення цілі.",
-  "changes": "Артилерійський приціл рухається покадрово, а крапки кола встигають промалюватися між оновленнями.",
+  "changes": "F11 перемикає точний і серверний приціли в бою. Клавішу можна змінити в менеджері модів.",
   "default_checked": true,
   "clean_patterns": [
     "ua.velet_presicion*.wotmod"
@@ -23,7 +23,7 @@
     "kind": "pyc",
     "source": "src/mods/velet_presicion/mod_velet_presicion.py",
     "entry": "res/scripts/client/gui/mods/mod_velet_presicion.pyc",
-    "output": "build/mods/{ver}/ua.velet_presicion_1.0.6.wotmod",
+    "output": "build/mods/{ver}/ua.velet_presicion_1.0.8.wotmod",
     "name": "Velet Presicion",
     "description": "Smooths the displayed penetration dot and both local aiming circles.",
     "extra": [],
@@ -37,8 +37,8 @@
   },
   "files": [
     {
-      "source": "build/mods/{ver}/ua.velet_presicion_1.0.6.wotmod",
-      "target": "game_files/mods/_VERSION_/ua.velet_presicion_1.0.6.wotmod"
+      "source": "build/mods/{ver}/ua.velet_presicion_1.0.8.wotmod",
+      "target": "game_files/mods/_VERSION_/ua.velet_presicion_1.0.8.wotmod"
     },
     {
       "source": "src/mods/velet_presicion/config.json",
@@ -51,6 +51,8 @@
     "ua.velet_presicion_1.0.2.wotmod",
     "ua.velet_presicion_1.0.3.wotmod",
     "ua.velet_presicion_1.0.4.wotmod",
-    "ua.velet_presicion_1.0.5.wotmod"
+    "ua.velet_presicion_1.0.5.wotmod",
+    "ua.velet_presicion_1.0.6.wotmod",
+    "ua.velet_presicion_1.0.7.wotmod"
   ]
 }

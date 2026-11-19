@@ -189,25 +189,50 @@ body.uamm-disable-research .uaResearchBtn {
 
 .uamm-list {
     flex: 1 1 auto;
-    padding-right: 8rem;
+    padding-right: 14rem;
 }
 
 .uamm-track {
     position: absolute;
-    right: 1rem;
+    right: 0;
     top: 0;
     bottom: 0;
-    width: 4rem;
-    border-radius: 2rem;
+    width: 11rem;
+    border-radius: 5rem;
     background-color: #2e2822;
-    pointer-events: none;
+    cursor: pointer;
+    user-select: none;
 }
 
 .uamm-thumb {
     position: absolute;
-    width: 100%;
-    border-radius: 2rem;
+    right: 2rem;
+    width: 5rem;
+    border-radius: 5rem;
     background-color: #8b6c50;
+    cursor: grab;
+}
+
+.uamm-track:hover .uamm-thumb,
+.uamm-dragging .uamm-thumb {
+    right: 0;
+    width: 100%;
+    background-color: #bc9670;
+}
+
+.uamm-dragging .uamm-thumb {
+    cursor: grabbing;
+}
+
+.uamm-bind-warning ul {
+    margin: 6rem 0 9rem;
+    padding-left: 22rem;
+}
+
+.uamm-bind-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5rem;
 }
 
 .uamm-group {
@@ -425,6 +450,8 @@ body.uamm-disable-research .uaResearchBtn {
     top: 100%;
     right: 0;
     width: 100%;
+    max-height: 200rem;
+    overflow-y: auto;
     padding: 3rem;
     background-color: #25201b;
     border: 1rem solid #795a3e;
@@ -546,4 +573,26 @@ body.uamm-disable-research .uaResearchBtn {
     .uamm-detail-title {
         font-size: 21rem;
     }
+}
+
+.uamm-setting .uamm-button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.uamm-key-picker {
+    padding: 8rem 0;
+}
+
+.uamm-key-picker .uamm-bind-actions {
+    margin-top: 6rem;
+}
+
+.uamm-key-search {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 6rem;
+    color: #f0dbc2;
+    background-color: #24201c;
+    border: 1rem solid #72583f;
 }

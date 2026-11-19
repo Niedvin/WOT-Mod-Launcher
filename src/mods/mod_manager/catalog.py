@@ -58,6 +58,9 @@ PROFILES = {
             number('dropdown_menu_width', 'Ширина списку серверів', 250, 150, 600, 10, 'px'),
             flag('fetch_on_start', 'Оновлювати онлайн під час запуску'),
         ), power='live'),
+    'ua.bui_customizer': profile(
+        'BUI Customizer', 'Утримуйте клавішу редагування в бою. ЛКМ перетягує панель або її край, ПКМ відкриває меню списку танків.',
+        'bui_customizer', 'mod_bui_customizer', power='live'),
     'ua.research_button': profile(
         'Quick Research', 'Відкриває дослідження модулів з картки машини.',
         'research_button', 'mod_research_button', power='live'),
@@ -78,7 +81,7 @@ PROFILES = {
             flag('fine_mouse', 'Точні рухи миші', False),
         ), power='live', config='_config'),
     'ua.appropriate_locker': profile(
-        'Appropriate Locker', 'Додає режим захоплення точки прицілювання. Перемикається в бою штатною клавішею моду.'),
+        'Appropriate Locker', 'Додає режим захоплення точки прицілювання. Перемикається в бою призначеною клавішею.'),
     'net.openwg.common': profile(
         'OpenWG Common', 'Бібліотека OpenWG. Коли активний Background FPS Limiter, він задає свій ліміт FPS.',
         graphics=True),
@@ -95,6 +98,12 @@ PROFILES = {
         'Intel XeSS', 'Додає XeSS до OpenWG GPU Upscalers.'),
     'local.zdiag': profile(
         'Діагностика zdiag', 'Записує діагностичні дані в журнал клієнта.'),
+}
+
+BINDS = {
+    'ua.bui_customizer': ('Утримувати для редагування', 'RALT'),
+    'ua.appropriate_locker': ('Перемкнути режим захоплення', 'Q'),
+    'ua.velet_presicion': ('Перемкнути точний і серверний приціли', 'F11'),
 }
 
 ALIASES = {

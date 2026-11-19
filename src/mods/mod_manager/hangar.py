@@ -10,6 +10,7 @@ from gui.impl.gen import R
 from gui.impl.lobby.hangar.random.random_hangar import RandomHangar, RouterModel
 from gui.impl.lobby.page import lobby_footer
 
+from . import bindings
 from .manager import Manager, commit_plan, legacy_plan, migrate_legacy, package_plan
 from .openwg import UPSCALER, controller_for
 from .compat import install_legacy_bridge
@@ -81,7 +82,7 @@ def restart_game(model, request):
 
 
 class ManagerRouterModel(RouterModel):
-    __slots__ = ('onModManagerRequest', 'opened', 'serial', 'response', 'graphics_control', 'graphics_callback')
+    __slots__ = ('onModManagerRequest', 'opened', 'serial', 'response', 'graphics_control', 'graphics_callback', 'binding')
 
     def __init__(self):
         self.opened = False
@@ -89,6 +90,7 @@ class ManagerRouterModel(RouterModel):
         self.response = ('', False, 0)
         self.graphics_control = None
         self.graphics_callback = None
+        self.binding = None
         super(ManagerRouterModel, self).__init__(properties=3, commands=3)
 
     def _initialize(self):
@@ -103,7 +105,7 @@ class ManagerRouterModel(RouterModel):
         self.serial += 1
         self._setString(2, json.dumps(dict(mods=_manager.snapshot(), open=self.opened, serial=self.serial,
                                            restartRequired=needs_restart(), restarting=_restarting,
-                                           status=status, error=error, request=request), ensure_ascii=True))
+                                           status=status, error=error, request=request, binding=self.binding), ensure_ascii=True))
 
     def on_graphics_changed(self):
         if self.graphics_callback is None:
@@ -125,6 +127,7 @@ class ManagerRouterModel(RouterModel):
 
     def close(self):
         self.opened = False
+        self.binding = None
         if self.graphics_callback is not None:
             BigWorld.cancelCallback(self.graphics_callback)
             self.graphics_callback = None
@@ -133,6 +136,24 @@ class ManagerRouterModel(RouterModel):
             self.graphics_control = None
             controller.onSettingsChanged -= self.on_graphics_changed
             controller.cancel_neural_support(self)
+
+    def capture_key(self, event):
+        if not self.opened or not self.binding or not self.binding.get('capture') or self.binding.get('choosing'):
+            return
+        name = bindings.name_from_event(event)
+        if name and name in bindings.native_keys():
+            self.finish_capture(name)
+
+    def finish_capture(self, name):
+        identifier = self.binding['id']
+        try:
+            offer = _manager.bindings.preview(identifier, name)
+            self.binding = _manager.bindings.assign(offer)
+            self.publish(u'Збережено.' if self.binding is None else '', request=0)
+        except (ValueError, OSError, IOError) as issue:
+            self.binding = None
+            LOGGER.warning('Binding %s/%r could not be saved: %s', identifier, name, issue)
+            self.publish(u'Клавішу не збережено.', True, request=0)
 
     def request(self, args):
         global _restarting
@@ -159,6 +180,29 @@ class ManagerRouterModel(RouterModel):
                           if key == 'enabled' and identifier in _manager.pending
                           else u'Збережено.')
                 LOGGER.info('Committed %s.%s = %s', identifier, key, value)
+            elif action == 'bindBegin':
+                identifier = args['id']
+                _manager.bindings.preview(identifier, '')
+                self.binding = dict(id=identifier, capture=True, keys=bindings.key_options())
+            elif action == 'bindSearch' and self.binding and self.binding.get('capture'):
+                self.binding['choosing'] = True
+                return
+            elif action == 'bindPick' and self.binding and self.binding.get('capture'):
+                self.finish_capture(args['key'])
+                return
+            elif action == 'bindReceived' and self.binding and self.binding.get('capture'):
+                self.finish_capture(args['key'])
+                return
+            elif action == 'bindCancel':
+                self.binding = None
+            elif action == 'bindClear':
+                _manager.bindings.assign(_manager.bindings.preview(args['id'], ''))
+                self.binding = None
+                status = u'Збережено.'
+            elif action == 'bindReplace' and self.binding and not self.binding.get('capture'):
+                self.binding = _manager.bindings.assign(self.binding, replace=True)
+                if self.binding is None:
+                    status = u'Збережено.'
             elif action == 'restart' and needs_restart() and not _restarting:
                 if not callable(getattr(BigWorld, 'restartGame', None)):
                     raise ValueError(u'Клієнт не підтримує перезапуск із меню.')
@@ -181,6 +225,11 @@ class ManagerRouterModel(RouterModel):
             status = u'Зміну не застосовано. Подробиці в game.log.'
             LOGGER.exception('Failed request %s', action)
         self.publish(status, error, request)
+
+
+def capture_binding(event):
+    if _current is not None:
+        _current.capture_key(event)
 
 
 def open_legacy(*args):
@@ -263,6 +312,11 @@ def init():
     with open(os.path.join(root, 'version.xml'), 'rb') as handle:
         version = re.search(br'v\.(\d+(?:\.\d+){3})', handle.read()).group(1)
     _manager = Manager(root, version)
+    from gui import InputHandler
+    from PlayerEvents import g_playerEvents
+    InputHandler.g_instance.onKeyDown += capture_binding
+    g_playerEvents.onAvatarBecomePlayer += _manager.bindings.enter_battle
+    g_playerEvents.onAvatarBecomeNonPlayer += _manager.bindings.leave_battle
     install_legacy_bridge()
     try:
         _legacy_changed = migrate_legacy(root, version)
@@ -283,6 +337,13 @@ def init():
 
 
 def fini():
+    if _manager is not None:
+        from gui import InputHandler
+        from PlayerEvents import g_playerEvents
+        InputHandler.g_instance.onKeyDown -= capture_binding
+        g_playerEvents.onAvatarBecomePlayer -= _manager.bindings.enter_battle
+        g_playerEvents.onAvatarBecomeNonPlayer -= _manager.bindings.leave_battle
+        _manager.bindings.leave_battle()
     try:
         if _manager is not None and not _restarting:
             deferred = finish_packages()
