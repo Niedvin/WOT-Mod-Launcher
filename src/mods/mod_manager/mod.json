@@ -3,7 +3,7 @@
   "dir": "mod_manager",
   "id": "ua.mod_manager",
   "title": "Niedvin Mod Manager",
-  "version": "1.1.6",
+  "version": "1.1.7",
   "author": "Niedvin",
   "description": "In-game mod settings and package switches.",
   "required": true,
@@ -21,7 +21,7 @@
     ],
     "outputs": [
       {
-        "to": "build/mod_manager/ua.mod_manager_1.1.6.wotmod"
+        "to": "build/mod_manager/ua.mod_manager_1.1.7.wotmod"
       }
     ],
     "test_commands": [
@@ -35,8 +35,8 @@
   },
   "files": [
     {
-      "source": "build/mod_manager/ua.mod_manager_1.1.6.wotmod",
-      "target": "game_files/mods/_VERSION_/ua.mod_manager_1.1.6.wotmod"
+      "source": "build/mod_manager/ua.mod_manager_1.1.7.wotmod",
+      "target": "game_files/mods/_VERSION_/ua.mod_manager_1.1.7.wotmod"
     }
   ],
   "obsolete": [
@@ -45,6 +45,8 @@
     "ua.mod_manager_1.1.2.wotmod",
     "ua.mod_manager_1.1.3.wotmod",
     "ua.mod_manager_1.1.4.wotmod",
-    "ua.mod_manager_1.1.5.wotmod"
-  ]
+    "ua.mod_manager_1.1.5.wotmod",
+    "ua.mod_manager_1.1.6.wotmod"
+  ],
+  "changes": "Подвійні копії пакетів більше не ламають перемикачі; кнопка «Моди» поза ангаром випадкових боїв пояснює, де відкривається менеджер."
 }

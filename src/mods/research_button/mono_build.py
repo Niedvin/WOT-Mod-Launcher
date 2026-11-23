@@ -17,7 +17,7 @@ INJECTOR = r'''
   if(document.getElementById('uaResearchStyle')){return;}
   var css=document.createElement('style');
   css.id='uaResearchStyle';
-  css.textContent='.uaResearchBtn{position:absolute;left:8rem;top:50%;transform:translateY(-50%);z-index:30;width:24rem;min-width:24rem;height:24rem;padding:0;outline:0;pointer-events:auto}.uaResearchBorder{display:none}.uaResearchGlyph{display:block;width:20rem;height:20rem;pointer-events:none}.mediaLarge .uaResearchBtn{width:32rem;min-width:32rem;height:32rem}.mediaLarge .uaResearchGlyph{width:24rem;height:24rem}.mediaExtraLarge .uaResearchBtn:not(.uaResearchBtn__double){left:12rem}.uaResearchBtn:focus-visible .uaResearchBg{background-color:rgba(237,230,217,.32)}';
+  css.textContent='.uaResearchBtn{position:absolute;left:8rem;top:50%;transform:translateY(-50%);z-index:30;width:24rem;min-width:24rem;height:24rem;padding:0;outline:0;pointer-events:auto}.uaResearchBorder{display:none}.uaResearchGlyph{display:block;width:20rem;height:20rem;pointer-events:none}.mediaLarge .uaResearchBtn{width:32rem;min-width:32rem;height:32rem}.mediaLarge .uaResearchGlyph{width:24rem;height:24rem}.mediaExtraLarge .uaResearchBtn{left:12rem}.mediaExtraLarge .uaResearchBtn.uaResearchBtn__double{left:8rem}';
   document.head.appendChild(css);
 })();
 '''

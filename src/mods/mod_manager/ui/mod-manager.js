@@ -366,6 +366,7 @@
             detail.appendChild(element('p', 'uamm-description', 'Перемикач діє з наступного запуску гри.'));
         }
         if (mod.error) detail.appendChild(element('p', 'uamm-notice uamm-error', mod.error));
+        if (mod.warning) detail.appendChild(element('p', 'uamm-notice', mod.warning));
         if (mod.graphics) {
             const openGraphics = button('Відкрити налаштування графіки', 'uamm-button uamm-graphics', () => send('graphics', { id: mod.id }));
             detail.appendChild(openGraphics);

@@ -7,7 +7,7 @@ import BigWorld
 import GUI
 import Keys
 
-from . import layout
+from . import layout, rating
 from .overlay import EditorOverlay, TeamStrip
 
 
@@ -33,6 +33,17 @@ FIELDS = {
 }
 
 
+def interface_scale():
+    try:
+        from helpers import dependency
+        from skeletons.account_helpers.settings_core import ISettingsCore
+        value = round(float(dependency.instance(ISettingsCore).interfaceScale.get()), 1)
+    except Exception:
+        return 1.0
+    # Battle Flash works in screen pixels / interface scale, as CrosshairDataProxy converts them — 2026-11-23
+    return value if value > 1.0 else 1.0
+
+
 def flash_bounds(clip, relative_to):
     bounds = clip.getBounds(relative_to)
     return tuple(float(getattr(bounds, key)) for key in ('x', 'y', 'width', 'height'))
@@ -43,20 +54,32 @@ def display_visible(clip, check_alpha=True):
     return bool(getattr(clip, 'visible', True)) and (alpha is None or float(alpha) > 0.01)
 
 
-def visible_content(clip):
+def visible_content(clip, skip_name=None):
     if not display_visible(clip):
+        return
+    if skip_name is not None and getattr(clip, 'name', None) == skip_name:
         return
     count = int(getattr(clip, 'numChildren', 0) or 0)
     if count:
         for index in range(count):
             child = clip.getChildAt(index)
             if child is not None:
-                for item in visible_content(child):
+                for item in visible_content(child, skip_name):
                     yield item
     else:
         text = getattr(clip, 'text', None)
         if (not isinstance(text, basestring) or text.strip()) and getattr(clip, 'getBounds', None) is not None:
             yield clip
+
+
+def equipment_slots(clip):
+    for i in range(int(getattr(clip, 'numChildren', 0) or 0)):
+        slot = clip.getChildAt(i)
+        child = getattr(slot, 'getChildByName', None)
+        if child is not None and display_visible(slot):
+            hit = child(b'hit') or child(b'iconLoader')
+            if hit is not None:
+                yield hit
 
 
 def enclosing_rect(rectangles):
@@ -148,12 +171,21 @@ class BattleLayout(object):
                 if clip is not None:
                     self.add_widget(key, clip, self.list_renderers(clip))
             self.add_widget('panelSwitch', getattr(panel, 'panelSwitch', None))
+        postmortem = root.getChildByName(b'postmortemPanelUI')
+        rating_host = postmortem.getChildByName(b'postmortemInfoPanel') if postmortem is not None else None
+        if rating_host is not None and getattr(rating_host, 'numChildren', 0):
+            self.add_widget('postmortemInfoPage', rating_host.getChildAt(0))
         names = (set(self.page.components) | set(layout.ELEMENTS)) - BLOCKED
         for key in names:
-            if key in layout.TEAMS or key == 'panelSwitch':
+            if key in layout.TEAMS or key in ('panelSwitch', 'postmortemInfoPage'):
                 continue
             component = self.page.getComponent(key)
             clip = getattr(component, 'flashObject', None)
+            if key == 'consumablesPanel':
+                # Component and timeline proxies can point to empty instances — 2026-11-20
+                clip = root.getChildByName(b'consumablesPanel') or clip
+            elif key == 'postmortemPanel':
+                clip = postmortem or clip
             if clip is None:
                 clip = getattr(root, str(FIELDS.get(key, key)), None)
             if clip is not None and getattr(clip, 'getBounds', None) is not None:
@@ -226,6 +258,10 @@ class BattleLayout(object):
     def preset(self, key, mode):
         return self.state['elements'].get(key, {}).get(mode)
 
+    def controls_equipment_position(self):
+        return (self.preset('consumablesPanel', 'slots') is not None or
+                self.drag is not None and self.drag['key'] == 'consumablesPanel')
+
     def target(self, key, mode, original):
         if self.drag is not None and self.drag['key'] == key and self.drag['mode'] == mode:
             return self.drag['target']
@@ -258,9 +294,9 @@ class BattleLayout(object):
 
     def on_screen(self, key, clip):
         alias = 'playersPanel' if key in layout.TEAMS or key == 'panelSwitch' else key
-        if alias not in self.native_visible:
+        if key != 'postmortemInfoPage' and alias not in self.native_visible:
             return False
-        if key == 'postmortemPanel' and not self.page._isInPostmortem:
+        if key in ('postmortemPanel', 'postmortemInfoPage') and not self.page._isInPostmortem:
             return False
         if key == 'sixthSense' and getattr(clip, 'currentFrame', None) == 1:
             return False
@@ -281,18 +317,32 @@ class BattleLayout(object):
     def widget_geometry(self, key, widget):
         sw, sh = self.screen
         dynamic = key not in layout.ALWAYS_VISIBLE
-        clips = visible_content(widget.draw_clip) if dynamic else (widget.draw_clip,)
+        if key == 'consumablesPanel':
+            clips = equipment_slots(widget.draw_clip)
+        elif key == 'postmortemPanel':
+            clips = visible_content(widget.draw_clip, 'postmortemInfoPanel')
+        elif key == 'postmortemInfoPage':
+            clips = (widget.draw_clip,)
+        else:
+            clips = visible_content(widget.draw_clip) if dynamic else (widget.draw_clip,)
         found = []
         for clip in clips:
-            rect = flash_bounds(clip, self.stage)
+            rect = self.region_bounds(key, clip, self.stage)
+            if rect is None:
+                continue
             _, _, width, height = rect
             if not (width > 0 and height > 0 and width <= sw * 1.15 and height <= sh * 1.15):
                 continue
             if width > sw * 0.82 and height > sh * 0.82:
                 continue
-            if key == 'minimap' or self.intersects_screen(rect):
+            if key in ('minimap', 'consumablesPanel') or self.intersects_screen(rect):
                 found.append((clip, rect))
         return found
+
+    @staticmethod
+    def region_bounds(key, clip, relative_to):
+        bounds = flash_bounds(clip, relative_to)
+        return rating.content_bounds(bounds) if key == 'postmortemInfoPage' else bounds
 
     def chat_hit_regions(self, widget):
         regions = []
@@ -307,14 +357,21 @@ class BattleLayout(object):
     def render_widgets(self, edited):
         hud_visible = self.page.isGuiVisible() and not self.page._isBattleLoading
         for key, widget in self.widgets.items():
-            if not hud_visible or key in self.native or not self.on_screen(key, widget.clip):
+            if not hud_visible or key in self.native:
                 continue
-            saved = self.preset(key, 'normal')
+            mode = layout.normal_mode(key)
+            saved = self.preset(key, mode)
             if saved is None and not edited:
+                continue
+            if key == 'consumablesPanel':
+                displayed = self.stage.getChildByName(b'consumablesPanel')
+                if displayed is not None:
+                    widget.clip = widget.draw_clip = displayed
+            if not self.on_screen(key, widget.clip):
                 continue
             geometry = self.widget_geometry(key, widget)
             if not geometry:
-                if key == 'minimap':
+                if key in ('minimap', 'consumablesPanel'):
                     widget.restore()
                 continue
             clips, regions = zip(*geometry)
@@ -324,15 +381,19 @@ class BattleLayout(object):
             if (key not in layout.ALWAYS_VISIBLE and rect[2] > self.screen[0] * 0.82
                     and rect[3] > self.screen[1] * 0.82):
                 continue
-            target = self.target(key, 'normal', rect)
+            target = self.target(key, mode, rect)
             if target != rect:
-                parent = widget.clip.parent
-                local = enclosing_rect([flash_bounds(clip, parent if parent is not None else self.stage)
-                                        for clip in clips])
+                local = self.parent_region(key, widget, clips, rect)
                 widget.apply(target, rect, local)
-                regions = tuple(flash_bounds(clip, self.stage) for clip in clips)
+                if key == 'consumablesPanel':
+                    regions = tuple(area for _, area in self.widget_geometry(key, widget))
+                    if not regions:
+                        widget.restore()
+                        continue
+                else:
+                    regions = tuple(self.region_bounds(key, clip, self.stage) for clip in clips)
                 rect = enclosing_rect(regions)
-                if key == 'minimap' and not self.intersects_screen(rect):
+                if key in ('minimap', 'consumablesPanel') and not self.intersects_screen(rect):
                     widget.restore()
                     continue
             if self.intersects_screen(rect):
@@ -341,7 +402,15 @@ class BattleLayout(object):
                     if not regions:
                         continue
                 self.bounds[key] = rect
-                self.hit_bounds[key] = (rect,) if key == 'postmortemPanel' else regions
+                self.hit_bounds[key] = (rect,) if key in ('postmortemPanel', 'consumablesPanel') else regions
+
+    def parent_region(self, key, widget, clips, stage_rect):
+        if key == 'consumablesPanel':
+            return stage_rect
+        parent = widget.clip.parent
+        if parent is None:
+            return stage_rect
+        return enclosing_rect([self.region_bounds(key, clip, parent) for clip in clips])
 
     def pointer(self):
         position = GUI.mcursor().position
@@ -381,7 +450,7 @@ class BattleLayout(object):
             return
         minimum = 38 if drag['mode'] == 'top' else layout.MIN_EDGE
         maximum = None
-        if drag['key'] == 'postmortemPanel':
+        if drag['key'] in ('postmortemPanel', 'postmortemInfoPage'):
             maximum = tuple(int(size * limit) for size, limit in zip(self.screen, layout.POSTMORTEM_LIMIT))
         drag['target'] = layout.adjust(drag['rect'], drag['grip'], dx, dy, self.screen, minimum, maximum)
 
@@ -396,7 +465,7 @@ class BattleLayout(object):
             changes.setdefault(key, {})[drag['mode']] = layout.normalize(drag['target'], self.screen)
             if self.save(dict(self.state, elements=changes)):
                 return
-        if drag['mode'] == 'normal' and self.preset(key, 'normal') is None:
+        if drag['mode'] == layout.normal_mode(key) and self.preset(key, drag['mode']) is None:
             self.widgets[key].restore()
         self.next_layout = 0
 
@@ -492,7 +561,7 @@ class BattleLayout(object):
             else:
                 target, rect, grip = self.pick(point)
                 if target is not None:
-                    mode = 'top' if target in self.native else 'normal'
+                    mode = 'top' if target in self.native else layout.normal_mode(target)
                     self.drag = dict(key=target, mode=mode, rect=rect, target=rect, grip=grip, start=point)
         return True
 
@@ -537,7 +606,8 @@ class BattleLayout(object):
                 down = BigWorld.isKeyDown(key)
                 if down != (key in self.buttons_down):
                     self.handle_key(key, down)
-        screen = tuple(float(side) for side in GUI.screenResolution()[:2])
+        scale = interface_scale()
+        screen = tuple(float(side) / scale for side in GUI.screenResolution()[:2])
         if min(screen) <= 0:
             return
         if self.screen != screen:

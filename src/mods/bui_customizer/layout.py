@@ -36,6 +36,7 @@ ELEMENTS = {
     'widgetPanel': 'Індикатори механік машини',
     'siegeModeIndicator': 'Облоговий режим',
     'postmortemPanel': 'Панель спостереження',
+    'postmortemInfoPage': 'Оцінка бою та кнопки спостереження',
     'spectatorView': 'Панель союзника',
     'battleHint': 'Підказка клавіш',
     'newbieHint': 'Підказка для новачка',
@@ -59,8 +60,12 @@ def valid_rect(value):
 
 
 def valid_preset(key, value):
-    return valid_rect(value) and (key != 'postmortemPanel' or
+    return valid_rect(value) and (key not in ('postmortemPanel', 'postmortemInfoPage') or
                                   all(size <= limit for size, limit in zip(value[2:], POSTMORTEM_LIMIT)))
+
+
+def normal_mode(key):
+    return 'slots' if key == 'consumablesPanel' else 'normal'
 
 
 def load(path=PATH):
@@ -71,7 +76,7 @@ def load(path=PATH):
     return {
         'elements': {
             key: {mode: list(rect) for mode, rect in saved.items()
-                  if mode in ('normal', 'top') and valid_preset(key, rect)}
+                  if mode in (normal_mode(key), 'top') and valid_preset(key, rect)}
             for key, saved in elements.items()
             if isinstance(saved, dict)
         },

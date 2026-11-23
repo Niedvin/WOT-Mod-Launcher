@@ -3,10 +3,10 @@
   "dir": "platoon_autostart",
   "id": "platoon_autostart",
   "title": "Squad+",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "author": "Niedvin",
-  "description": "Автоматичний старт взводу при готовності всіх бійців, системне сповіщення про старт та модернізований компактний інтерфейс вікна взводу, сумісний з івентовими ангарами.",
-  "changes": "Повернуто панель взводу у згорнутому стані, коли взвод ще не створено.",
+  "description": "Автоматичний старт і компактний інтерфейс взводів у сталих режимах.",
+  "changes": "В івентах відкриваються штатні вікна взводу та діють штатні налаштування. Вікно взводу стоїть на своєму місці при будь-якому масштабі інтерфейсу, кнопка «В бій» ховається разом із перемикачем, а без «Тримати вікно відкритим» панель взводу не з’являється сама.",
   "default_checked": true,
   "clean_patterns": [
     "ua.platoon_autostart*.wotmod"
@@ -19,44 +19,26 @@
     "Автоматичний вхід у бій взводу при готовності всіх гравців.",
     "Захист від подвійних кліків (кулдаун 0.5с).",
     "Дублювання кнопки \"В бій\" безпосередньо у вікні взводу.",
-    "Оновлений компактний інтерфейс вікна взводу, сумісний з івентовими ангарами."
+    "Оновлений компактний інтерфейс вікна взводу в сталих режимах."
   ],
   "build": {
-    "kind": "pyc",
-    "source": "src/mods/platoon_autostart/mod_platoon_autostart.py",
-    "entry": "res/scripts/client/gui/mods/mod_platoon_autostart.pyc",
-    "output": "build/mods/{ver}/ua.platoon_autostart_1.0.11.wotmod",
-    "name": "Squad+",
-    "description": "Auto-starts battle when platoon is ready, duplicates Battle button in platoon window, and fixes ready cooldown delay.",
-    "extra": [
-      {
-        "source": "src/mods/platoon_autostart/MembersWindow.js",
-        "entry": "res/gui/gameface/_dist/production/lobby/platoon/MembersWindow/MembersWindow.js"
-      },
-      {
-        "source": "src/mods/platoon_autostart/MembersWindow.css",
-        "entry": "res/gui/gameface/_dist/production/lobby/platoon/MembersWindow/MembersWindow.css"
-      },
-      {
-        "source": "src/mods/platoon_autostart/PlatoonDropdown.js",
-        "entry": "res/gui/gameface/_dist/production/lobby/platoon/PlatoonDropdown/PlatoonDropdown.js"
-      },
-      {
-        "source": "src/mods/platoon_autostart/PlatoonDropdown.css",
-        "entry": "res/gui/gameface/_dist/production/lobby/platoon/PlatoonDropdown/PlatoonDropdown.css"
-      }
-    ],
-    "test_commands": [
+    "kind": "script",
+    "commands": [
       [
-        "py27",
-        "scratch/test_hangar_detection.py"
+        "python",
+        "src/mods/platoon_autostart/build.py"
       ]
+    ],
+    "outputs": [
+      {
+        "to": "build/mods/{ver}/ua.platoon_autostart_1.0.12.wotmod"
+      }
     ]
   },
   "files": [
     {
-      "source": "build/mods/{ver}/ua.platoon_autostart_1.0.11.wotmod",
-      "target": "game_files/mods/_VERSION_/ua.platoon_autostart_1.0.11.wotmod"
+      "source": "build/mods/{ver}/ua.platoon_autostart_1.0.12.wotmod",
+      "target": "game_files/mods/_VERSION_/ua.platoon_autostart_1.0.12.wotmod"
     },
     {
       "source": "mods/configs/platoon_autostart/config.json",
@@ -78,6 +60,7 @@
     "ua.platoon_autostart_1.0.7.wotmod",
     "ua.platoon_autostart_1.0.8.wotmod",
     "ua.platoon_autostart_1.0.9.wotmod",
-    "ua.platoon_autostart_1.0.10.wotmod"
+    "ua.platoon_autostart_1.0.10.wotmod",
+    "ua.platoon_autostart_1.0.11.wotmod"
   ]
 }

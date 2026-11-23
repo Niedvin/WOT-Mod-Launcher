@@ -336,7 +336,7 @@ def _get_best_online_host():
 
 
 def _apply_best_server_selection():
-    if not _CONFIG.get('auto_connect_max_online', True):
+    if not _CONFIG.get('enabled', True) or not _CONFIG.get('auto_connect_max_online', True):
         return
     best_host, max_online = _get_best_online_host()
     if not best_host or max_online <= 0:
@@ -425,12 +425,15 @@ def _hooked_makeVO(self, index, item):
     vo = _orig_makeVO(self, index, item)
     if not vo or not isinstance(vo, dict):
         return vo
-    if not _CONFIG.get('enabled', True) or not _CONFIG.get('show_online_in_dropdown', True):
+    if not _CONFIG.get('enabled', True):
         return vo
     try:
         label = vo.get('label', u'')
         if _CONFIG.get('strip_wot_prefix', True) and label.startswith(u'WOT '):
             label = label[4:]
+        vo['label'] = label
+        if not _CONFIG.get('show_online_in_dropdown', True):
+            return vo
         host_url = vo.get('data')
         if host_url == AUTO_LOGIN_QUERY_URL:
             best_host, max_online = _get_best_online_host()
@@ -442,8 +445,6 @@ def _hooked_makeVO(self, index, item):
                 online = _get_server_online(host)
                 if online is not None and online >= 0:
                     vo['label'] = u'%s (%s)' % (label, _format_online(online))
-                elif _CONFIG.get('strip_wot_prefix', True):
-                    vo['label'] = label
     except Exception:
         LOG_CURRENT_EXCEPTION()
     return vo
@@ -558,10 +559,16 @@ def _check_post_battle_relogin():
         try:
             from gui.prb_control.dispatcher import g_prbLoader
             dispatcher = g_prbLoader.getDispatcher()
-            if dispatcher and dispatcher.getEntity().hasLockedState():
-                return
+            if dispatcher is not None:
+                if dispatcher.getEntity().hasLockedState():
+                    return
+                state = dispatcher.getFunctionalState()
+                if state.isInLegacy():
+                    LOG_NOTE('[ServerOnline] Post-battle relogin skipped: player is in a room')
+                    return
         except Exception:
-            pass
+            LOG_CURRENT_EXCEPTION()
+            return
 
         current_periphery_id = conn_mgr.peripheryID
         if not current_periphery_id or current_periphery_id == constants.STANDALONE_CLUSTER_ID:

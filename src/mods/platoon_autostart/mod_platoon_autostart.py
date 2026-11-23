@@ -7,7 +7,7 @@ import time
 import weakref
 import BigWorld
 from adisp import adisp_process
-from constants import PREBATTLE_TYPE
+from constants import ARENA_BONUS_TYPE, PREBATTLE_TYPE, QUEUE_TYPE
 from debug_utils import LOG_NOTE, LOG_ERROR, LOG_CURRENT_EXCEPTION
 from gui.impl.lobby.platoon.view.platoon_members_view import SquadMembersView, MembersWindow
 from gui.impl.lobby.platoon.view.platoon_selection_view import SelectionWindow
@@ -234,20 +234,86 @@ def _init_mods_settings():
         pass
 
 
+def _allowed_squad_entity(entity):
+    if entity is None:
+        return False
+    queue_type = getattr(entity, 'getQueueType', lambda: None)()
+    entity_type = getattr(entity, 'getEntityType', lambda: None)()
+    queues = frozenset(getattr(QUEUE_TYPE, name) for name in ('RANDOMS', 'STRONGHOLD_UNITS')
+                       if hasattr(QUEUE_TYPE, name))
+    legacy_types = frozenset(getattr(PREBATTLE_TYPE, name) for name in ('TRAINING', 'STRONGHOLD')
+                             if hasattr(PREBATTLE_TYPE, name))
+    return queue_type in queues or (queue_type in (None, 0) and entity_type in legacy_types)
+
+
+def _squad_features_enabled():
+    if not _CONFIG.get('enabled', True):
+        return False
+    from gui.prb_control.dispatcher import g_prbLoader
+    dispatcher = g_prbLoader.getDispatcher()
+    alias = _get_sub_view_alias()
+    return (dispatcher is not None and alias is not None and str(alias).lower() in _STANDARD_HANGAR_ALIASES
+            and _allowed_squad_entity(dispatcher.getEntity()))
+
+
+def _battle_features_enabled():
+    allowed = frozenset(getattr(ARENA_BONUS_TYPE, name) for name in ('REGULAR', 'EPIC_RANDOM', 'TRAINING', 'SORTIE_2', 'FORT_BATTLE_2')
+                        if hasattr(ARENA_BONUS_TYPE, name))
+    return _CONFIG.get('enabled', True) and getattr(BigWorld.player(), 'arenaBonusType', None) in allowed
+
+
+_squad_model_properties = {}
+
+
+def _restore_squad_models():
+    for view, original in _squad_model_properties.items():
+        view._viewModelClass = original
+    _squad_model_properties.clear()
+
+
+def _install_squad_models():
+    for view in (SquadMembersView, WelcomeView):
+        original = view._viewModelClass
+        _squad_model_properties[view] = original
+        view._viewModelClass = property(_squad_model_getter(original.fget))
+
+
+def _squad_model_getter(original):
+    models = {}
+
+    def get_model(view):
+        native = original(view)
+        if native not in models:
+            class SquadModeModel(native):
+                def __init__(self):
+                    properties, commands = native.__init__.im_func.func_defaults
+                    native.__init__(self, properties + 2, commands)
+
+                def _initialize(self):
+                    native._initialize(self)
+                    self._addBoolProperty('squadPlusEnabled', _is_in_hangar())
+                    self._addBoolProperty('squadPlusBattleButton', bool(_CONFIG.get('duplicate_battle_button_enabled', True)))
+
+            models[native] = SquadModeModel
+        return models[native]
+
+    return get_model
+
+
 def _hooked_SetReady_getCooldown(self):
-    if _CONFIG.get('enabled', True) and _CONFIG.get('cooldown_fix_enabled', True):
+    if _squad_features_enabled() and _CONFIG.get('cooldown_fix_enabled', True):
         return float(_CONFIG.get('cooldown_seconds', 0.5))
     return _orig_SetReady_getCooldown(self)
 
 
 def _hooked_SetVehicle_getCooldown(self):
-    if _CONFIG.get('enabled', True) and _CONFIG.get('cooldown_fix_enabled', True) and getattr(self, 'setReady', False):
+    if _squad_features_enabled() and _CONFIG.get('cooldown_fix_enabled', True) and getattr(self, 'setReady', False):
         return float(_CONFIG.get('cooldown_seconds', 0.5))
     return _orig_SetVehicle_getCooldown(self)
 
 
 def _hooked_SquadEntity_setVehicle(self, ctx, callback=None):
-    if _CONFIG.get('enabled', True) and ctx.setReady:
+    if _squad_features_enabled() and ctx.setReady:
         vehicles = self.getVehiclesInfo()
         if vehicles and not vehicles[0].isEmpty():
             vehicle = vehicles[0]
@@ -260,13 +326,13 @@ def _hooked_SquadEntity_setVehicle(self, ctx, callback=None):
 
 
 def _hooked_UnitCooldown_process(self, rqTypeID, coolDown=None):
-    if _CONFIG.get('enabled', True) and _CONFIG.get('cooldown_fix_enabled', True) and rqTypeID == REQUEST_TYPE.SET_PLAYER_STATE:
+    if _squad_features_enabled() and _CONFIG.get('cooldown_fix_enabled', True) and rqTypeID == REQUEST_TYPE.SET_PLAYER_STATE:
         coolDown = float(_CONFIG.get('cooldown_seconds', 0.5))
     return _orig_UnitCooldown_process(self, rqTypeID, coolDown=coolDown)
 
 
 def _hooked_UnitCooldown_validate(self, rqTypeID, coolDown=None):
-    if _CONFIG.get('enabled', True) and _CONFIG.get('cooldown_fix_enabled', True) and rqTypeID == REQUEST_TYPE.SET_PLAYER_STATE:
+    if _squad_features_enabled() and _CONFIG.get('cooldown_fix_enabled', True) and rqTypeID == REQUEST_TYPE.SET_PLAYER_STATE:
         coolDown = float(_CONFIG.get('cooldown_seconds', 0.5))
     return _orig_UnitCooldown_validate(self, rqTypeID, coolDown=coolDown)
 
@@ -294,7 +360,7 @@ def _hooked_showPlatoonWarningDialog(resources):
                 is_solo_squad = True
         except Exception:
             pass
-    if is_solo_squad:
+    if is_solo_squad and _squad_features_enabled():
         LOG_NOTE('[PlatoonAutoStart] Auto-confirming solo platoon battle dialog')
         raise AsyncReturn(True)
     if _orig_showPlatoonWarningDialog is not None:
@@ -314,7 +380,7 @@ def _start_battle_now(entity):
 
 
 def _handle_start_battle_click():
-    if not _CONFIG.get('enabled', True) or not _CONFIG.get('duplicate_battle_button_enabled', True):
+    if not _squad_features_enabled() or not _CONFIG.get('duplicate_battle_button_enabled', True):
         return
     try:
         from gui.prb_control.dispatcher import g_prbLoader
@@ -389,6 +455,8 @@ def _on_selection_solo_toggle():
 
 
 def _hooked_SquadMembersView_onFocusChange(self, *args, **kwargs):
+    if not _is_in_hangar():
+        return _orig_SquadMembersView_onFocusChange(self, *args, **kwargs)
     data = None
     if args and len(args) > 0:
         if isinstance(args[0], dict):
@@ -399,25 +467,21 @@ def _hooked_SquadMembersView_onFocusChange(self, *args, **kwargs):
         data = kwargs
     if data:
         if data.get('isStartBattle', False):
-            if _is_in_hangar():
-                _handle_start_battle_click()
+            _handle_start_battle_click()
             return
         if data.get('inviteFriends', False):
-            if _is_in_hangar():
-                LOG_NOTE('[PlatoonAutoStart] Empty slot clicked -> opening invite dialog')
-                _open_quick_invites(self, data.get('slotId', -1))
+            LOG_NOTE('[PlatoonAutoStart] Empty slot clicked -> opening invite dialog')
+            _open_quick_invites(self, data.get('slotId', -1))
             return
         if 'inviteFriendID' in data:
-            if _is_in_hangar():
-                _send_quick_invite(self, data['inviteFriendID'], data.get('slotId', -1))
+            _send_quick_invite(self, data['inviteFriendID'], data.get('slotId', -1))
             return
         if data.get('closeFriendList', False):
             _publish_quick_invites(self, {'status': 'closed'})
             return
         if 'soloMode' in data:
-            if _is_in_hangar():
-                LOG_NOTE('[PlatoonAutoStart] Solo mode toggle clicked: %s' % data['soloMode'])
-                _handle_solo_mode_toggle(data['soloMode'])
+            LOG_NOTE('[PlatoonAutoStart] Solo mode toggle clicked: %s' % data['soloMode'])
+            _handle_solo_mode_toggle(data['soloMode'])
             return
     if _orig_SquadMembersView_onFocusChange is not None:
         return _orig_SquadMembersView_onFocusChange(self, *args, **kwargs)
@@ -664,7 +728,7 @@ def _check_all_ready():
 
 def _schedule_auto_start_check():
     global _AUTO_START_TIMER_ID
-    if not _CONFIG.get('enabled', True) or not _CONFIG.get('auto_start_enabled', True):
+    if not _squad_features_enabled() or not _CONFIG.get('auto_start_enabled', True):
         return
     if not _is_in_hangar():
         _cancel_auto_start_timer()
@@ -708,7 +772,7 @@ def _on_auto_start_timer():
     global _AUTO_START_TIMER_ID
     _AUTO_START_TIMER_ID = None
 
-    if not _CONFIG.get('enabled', True) or not _CONFIG.get('auto_start_enabled', True):
+    if not _squad_features_enabled() or not _CONFIG.get('auto_start_enabled', True):
         return
 
     if not _is_in_hangar():
@@ -755,7 +819,7 @@ def _hooked_PlatoonController_onUnitMembersListChanged(self):
 
 @adisp_process
 def _hooked_SquadMembersView_onSwitchReady(self, *args, **kwargs):
-    if not _CONFIG.get('enabled', True):
+    if not _squad_features_enabled():
         _orig_SquadMembersView_onSwitchReady(self, *args, **kwargs)
         return
 
@@ -766,7 +830,7 @@ def _hooked_SquadMembersView_onSwitchReady(self, *args, **kwargs):
 
 def _hooked_SquadMembersView_updateReadyButton(self, *args, **kwargs):
     _orig_SquadMembersView_updateReadyButton(self, *args, **kwargs)
-    if (_CONFIG.get('enabled', True) and self._platoonCtrl.isInPlatoon()
+    if (_squad_features_enabled() and self._platoonCtrl.isInPlatoon()
             and self._platoonCtrl.isInCoolDown(REQUEST_TYPE.SET_PLAYER_STATE)
             and not self.hasDelayedCallback(self._updateReadyButton)):
         # Stock refresh leaves readiness disabled while the request cooldown is active — 2026-11-14
@@ -849,9 +913,12 @@ def _is_in_hangar():
             _hangar_debug('no_sub_view')
             return False
 
-        # Squad+ features stay in the default hangar; event hangars keep stock UI — 2026-11-17
         if str(sub_alias).lower() not in _STANDARD_HANGAR_ALIASES:
             _hangar_debug('alias=%s' % sub_alias)
+            return False
+
+        if not _squad_features_enabled():
+            _hangar_debug('battle_mode')
             return False
 
         if _has_fullscreen_window():
@@ -925,18 +992,30 @@ def _hide_platoon_ui_immediately():
         pass
 
 
+def _window_scale():
+    try:
+        import GUI
+        height = float(GUI.screenResolution()[1])
+    except Exception:
+        return 1.0
+    try:
+        from helpers import dependency
+        from skeletons.account_helpers.settings_core import ISettingsCore
+        interface = float(dependency.instance(ISettingsCore).interfaceScale.get())
+    except Exception:
+        interface = 1.0
+    # Wulf windows move in interface pixels: screen pixels / interface scale — 2026-11-23
+    if interface > 0.0:
+        height /= interface
+    return height / 1080.0 if height > 0.0 else 1.0
+
+
 def _apply_platoon_window_position(wnd, is_create_btn=None):
     global _IS_SETTING_WINDOW_POS
     _refresh_config()
     if not _is_in_hangar():
         return
-    try:
-        import GUI
-        screenW, screenH = GUI.screenResolution()
-    except Exception:
-        screenW, screenH = 1920, 1080
-
-    scale = screenH / 1080.0
+    scale = _window_scale()
     is_create = is_create_btn
     if is_create is None:
         cls_name = getattr(wnd, '__class__', type(wnd)).__name__
@@ -974,6 +1053,8 @@ def _hooked_MembersWindow_center(self):
 
 
 def _hooked_MembersWindow_init(self, initialPosition=None):
+    if not _is_in_hangar():
+        return _orig_MembersWindow_init(self, initialPosition)
     try:
         from frameworks.wulf import WindowFlags
         from gui.impl.lobby.platoon.platoon_config import PLATOON_VIEW_BY_PRB_TYPE
@@ -997,6 +1078,8 @@ def _hooked_MembersWindow_init(self, initialPosition=None):
 
 
 def _hooked_SelectionWindow_init(self):
+    if not _is_in_hangar():
+        return _orig_SelectionWindow_init(self)
     try:
         from frameworks.wulf import WindowFlags
         super(SelectionWindow, self).__init__(
@@ -1040,7 +1123,7 @@ def _hooked_PlatoonController_setPlatoonPopoverPosition(self, xPopoverOffset):
         if _orig_PlatoonController_setPlatoonPopoverPosition:
             return _orig_PlatoonController_setPlatoonPopoverPosition(self, xPopoverOffset)
         return
-    if _CONFIG.get('enabled', True):
+    if _squad_features_enabled():
         try:
             from gui.impl.lobby.platoon.platoon_config import EPlatoonLayout
             for ePlatoonLayout in (EPlatoonLayout.WELCOME, EPlatoonLayout.SEARCH):
@@ -1059,8 +1142,6 @@ def _hooked_PlatoonController_setPlatoonPopoverPosition(self, xPopoverOffset):
 
 
 def _hooked_PlatoonController_showWindow(self, ePlatoonLayout):
-    if not _is_any_hangar_state():
-        return
     if not _is_in_hangar():
         if _orig_PlatoonController_showWindow:
             return _orig_PlatoonController_showWindow(self, ePlatoonLayout)
@@ -1106,6 +1187,8 @@ def _update_visibility():
     if not _CONFIG.get('enabled', True):
         return
     try:
+        if _get_sub_view_alias() is not None and not _squad_features_enabled():
+            return
         from helpers import dependency
         from skeletons.gui.game_control import IPlatoonController
         platoonCtrl = dependency.instance(IPlatoonController)
@@ -1116,7 +1199,6 @@ def _update_visibility():
 
         if not in_hangar:
             _UI_FREE_RETRIES = 0
-            # Battle results and other overlays keep the platoon UI hidden — 2026-11-17
             if (not _is_any_hangar_state() or _has_fullscreen_window()) and platoonCtrl.isAnyPlatoonUIShown():
                 platoonCtrl.destroyUI(hideOnly=True)
             _wait_for_hangar_view()
@@ -1137,6 +1219,8 @@ def _update_visibility():
         _UI_FREE_RETRIES = 0
 
         if not platoonCtrl.isInPlatoon():
+            if not _CONFIG.get('keep_window_open', True):
+                return
             from gui.impl.lobby.platoon.platoon_config import EPlatoonLayout
             show_window = getattr(platoonCtrl, '_PlatoonController__showWindow', None)
             if show_window is not None:
@@ -1178,6 +1262,8 @@ def _hooked_PlatoonController_leavePlatoon(self, *args, **kwargs):
 
 def _hooked_PlatoonController_evaluateVisibility(self, toggleUI=False):
     global _USER_CLOSED_WINDOW
+    if not _squad_features_enabled():
+        return _orig_PlatoonController_evaluateVisibility(self, toggleUI=toggleUI)
     if not _is_any_hangar_state():
         if self.isAnyPlatoonUIShown():
             self.destroyUI(hideOnly=True)
@@ -1203,6 +1289,8 @@ def _hooked_PlatoonController_evaluateVisibility(self, toggleUI=False):
 
 def _hooked_SquadMembersView_onLeavePlatoon(self):
     global _USER_CLOSED_WINDOW
+    if not _is_in_hangar():
+        return _orig_SquadMembersView_onLeavePlatoon(self)
     _USER_CLOSED_WINDOW = False
     _clear_solo_invites()
     try:
@@ -1218,24 +1306,22 @@ def _hooked_SquadMembersView_onLeavePlatoon(self):
 
 def _hooked_SquadMembersView_onMinimized(self, *args, **kwargs):
     global _USER_CLOSED_WINDOW
-    _USER_CLOSED_WINDOW = True
+    if _is_in_hangar():
+        _USER_CLOSED_WINDOW = True
     if _orig_SquadMembersView_onMinimized:
         return _orig_SquadMembersView_onMinimized(self, *args, **kwargs)
 
 
 def _hooked_MembersWindow_move(self, x, y):
     global _IS_SETTING_WINDOW_POS
+    if not _is_in_hangar():
+        return _orig_MembersWindow_move(self, x, y)
     if _IS_SETTING_WINDOW_POS:
         if _orig_MembersWindow_move:
             _orig_MembersWindow_move(self, x, y)
         return
 
-    try:
-        import GUI
-        screenW, screenH = GUI.screenResolution()
-        scale = screenH / 1080.0
-    except Exception:
-        scale = 1.0
+    scale = _window_scale()
 
     if _CONFIG.get('fixed_window_pos', False):
         targetX = int(_CONFIG.get('window_pos_x', 26) * scale)
@@ -1259,7 +1345,7 @@ def _on_route_changed(*args, **kwargs):
             _WAS_IN_BATTLE = False
             if _SOLO_MODE_ENABLED:
                 _trigger_auto_leave_platoon()
-    elif not _is_any_hangar_state():
+    elif _squad_features_enabled() and not _is_any_hangar_state():
         _hide_platoon_ui_immediately()
     _schedule_visibility_check(0.1)
 
@@ -1439,7 +1525,7 @@ def _clear_solo_invites():
 
 def _try_start_solo_mode_invites():
     global _PENDING_SOLO_INVITES, _SOLO_INVITE_CALLBACK_ID
-    if not _SOLO_MODE_ENABLED:
+    if not _SOLO_MODE_ENABLED or not _battle_features_enabled():
         return
     if _SOLO_INVITE_CALLBACK_ID is not None:
         return
@@ -1499,7 +1585,7 @@ def _process_next_solo_invite():
     global _SOLO_INVITE_CALLBACK_ID, _PENDING_SOLO_INVITES
     _SOLO_INVITE_CALLBACK_ID = None
 
-    if not _SOLO_MODE_ENABLED:
+    if not _SOLO_MODE_ENABLED or not _battle_features_enabled():
         _clear_solo_invites()
         return
 
@@ -1570,15 +1656,15 @@ def _process_next_solo_invite():
 def _on_avatar_become_player(*args, **kwargs):
     global _WAS_IN_BATTLE, _SENT_INVITE_VEH_IDS
     _cancel_auto_leave()
-    _WAS_IN_BATTLE = True
+    _WAS_IN_BATTLE = _battle_features_enabled()
     _SENT_INVITE_VEH_IDS = set()
     _clear_solo_invites()
-    if _SOLO_MODE_ENABLED:
+    if _SOLO_MODE_ENABLED and _WAS_IN_BATTLE:
         BigWorld.callback(_solo_invite_delay(), _try_start_solo_mode_invites)
 
 
 def _on_arena_period_change(period, *args, **kwargs):
-    if _SOLO_MODE_ENABLED and period in (2, 3):
+    if _SOLO_MODE_ENABLED and period in (2, 3) and _battle_features_enabled():
         BigWorld.callback(0.5, _try_start_solo_mode_invites)
 
 
@@ -1606,6 +1692,9 @@ def _do_auto_leave_attempt(attempt=1):
             pass
         _AUTO_LEAVE_TIMER_ID = None
     if not _PENDING_AUTO_LEAVE or not _SOLO_MODE_ENABLED:
+        _cancel_auto_leave()
+        return
+    if not _squad_features_enabled():
         _cancel_auto_leave()
         return
 
@@ -1705,6 +1794,7 @@ def _install_invites_none_guard():
 
 
 def init():
+    _install_squad_models()
     global _orig_SetReady_getCooldown, _orig_SetVehicle_getCooldown
     global _orig_SquadEntity_setVehicle
     global _orig_UnitCooldown_process, _orig_UnitCooldown_validate
@@ -1874,6 +1964,7 @@ def init():
 
 
 def fini():
+    _restore_squad_models()
     global _orig_SetReady_getCooldown, _orig_SetVehicle_getCooldown
     global _orig_SquadEntity_setVehicle
     global _orig_UnitCooldown_process, _orig_UnitCooldown_validate

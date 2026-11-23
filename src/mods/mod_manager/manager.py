@@ -103,20 +103,47 @@ def scan_packages(root):
             if identifier in HIDDEN or fallback in HIDDEN:
                 continue
             config = PROFILES.get(identifier, profile(title, ''))
-            item = catalog.setdefault(identifier, dict(config, id=identifier, version=version, paths=[], installed=False))
+            item = catalog.setdefault(identifier, dict(config, id=identifier, version=version, paths=[], installed=False,
+                                                       copies=0))
             if base not in item['paths']:
                 item['paths'].append(base)
             item['installed'] = item['installed'] or actual == base
+            item['copies'] += actual == base
     return catalog
 
 
-def plan_moves(paths, enabled):
+def same_file(first, second):
+    if os.path.getsize(first) != os.path.getsize(second):
+        return False
+    with open(first, 'rb') as left, open(second, 'rb') as right:
+        while True:
+            chunk = left.read(1 << 20)
+            if chunk != right.read(1 << 20):
+                return False
+            if not chunk:
+                return True
+
+
+def archive_path(path, folder, reserved):
+    target = os.path.join(folder, os.path.basename(path))
+    index = 1
+    while os.path.exists(target) or target in reserved:
+        index += 1
+        target = os.path.join(folder, '%s.%d' % (os.path.basename(path), index))
+    reserved.add(target)
+    return target
+
+
+def plan_moves(paths, enabled, archive=None, reserved=None):
     moves = []
+    reserved = set() if reserved is None else reserved
     for path in paths:
         source, target = (path + OFF, path) if enabled else (path, path + OFF)
         if os.path.isfile(source):
             if os.path.exists(target):
-                raise OSError('Package already exists: ' + target)
+                if archive is None or not os.path.isfile(target) or not same_file(source, target):
+                    raise OSError('Package already exists: ' + target)
+                target = archive_path(source, archive, reserved)
             moves.append((source, target))
     return moves
 
@@ -192,11 +219,13 @@ def pending_path(root, version):
 def package_plan(root, version, pending):
     path = pending_path(root, version)
     catalog = scan_packages(os.path.join(root, 'mods', version))
+    archive = os.path.join(root, '.backups', 'mod-manager-duplicates', version)
+    reserved = set()
     moves = []
     for identifier, enabled in pending.items():
         if not isinstance(enabled, bool) or identifier not in catalog:
             raise ValueError('Unknown pending package: ' + identifier)
-        moves.extend(plan_moves(catalog[identifier]['paths'], enabled))
+        moves.extend(plan_moves(catalog[identifier]['paths'], enabled, archive, reserved))
     return dict(moves=moves, path=path, value={})
 
 
@@ -327,10 +356,19 @@ class Manager(object):
                     LOGGER.exception('Cannot read graphics options for %s', item['id'])
             restart = item['power'] != 'live' or not item['installed']
             pending = item['id'] in self.pending
+            warning = ''
+            if item.get('copies', 0) > 1:
+                warning = 'Гра завантажує кілька копій цього пакета.'
+                try:
+                    folder = os.path.join(self.root, 'mods', self.version)
+                    warning = warning[:-1] + ': ' + ', '.join(
+                        os.path.relpath(path, folder) for path in item['paths'] if os.path.isfile(path)) + '.'
+                except (UnicodeError, ValueError):
+                    pass
             view.append(dict(id=item['id'], title=item['title'], description=item['description'],
                              version=item['version'], running=running, enabled=enabled, restart=restart,
                              pending=pending, fields=fields, graphics=item['graphics'] and running,
-                             error=error, library=item['id'].startswith('net.openwg.')))
+                             error=error, warning=warning, library=item['id'].startswith('net.openwg.')))
         return sorted(view, key=lambda item: (item['library'], item['title'].lower(), item['id']))
 
     def requested_changes(self, identifier, enabled):

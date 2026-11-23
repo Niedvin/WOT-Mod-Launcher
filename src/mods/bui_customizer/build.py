@@ -16,6 +16,7 @@ FILES = {
     'layout.py': 'ua_bui/layout.py',
     'modes.py': 'ua_bui/modes.py',
     'overlay.py': 'ua_bui/overlay.py',
+    'rating.py': 'ua_bui/rating.py',
     'battle.py': 'ua_bui/battle.py',
     'entry.py': 'mods/mod_bui_customizer.py',
 }
@@ -26,6 +27,8 @@ PALETTE = {
     'focus': (109, 193, 255, 250),
 }
 MENU_TEXTURES = ('menu_side.png', 'menu_top.png')
+RATING_VIEW = 'gui/gameface/_dist/production/battle/postmortem_panel/PostmortemPanelView/PostmortemPanelView.html'
+RATING_SCRIPT = 'gui/gameface/mods/niedvin/bui/rating.js'
 RESIZE_ICONS = {
     'horizontal': (1, 0),
     'vertical': (0, 1),
@@ -96,6 +99,13 @@ def build(root):
                 archive.write(SOURCE / 'assets' / name, 'res/gui/maps/bui_customizer/' + name)
             for name, direction in RESIZE_ICONS.items():
                 archive.writestr('res/gui/maps/bui_customizer/resize_' + name + '.png', resize_texture(*direction))
+            with zipfile.ZipFile(root / 'res' / 'packages' / 'gui-part1.pkg') as native:
+                rating_html = native.read(RATING_VIEW).decode('utf-8')
+            if rating_html.count('</head>') != 1:
+                raise ValueError('Unexpected postmortem view markup')
+            bridge = '<script defer crossorigin src="coui://' + RATING_SCRIPT + '"></script>'
+            archive.writestr('res/' + RATING_VIEW, rating_html.replace('</head>', bridge + '</head>'))
+            archive.write(SOURCE / 'rating.js', 'res/' + RATING_SCRIPT)
             for name, destination in FILES.items():
                 output = work / (name + 'c')
                 resource = 'scripts/client/gui/' + destination
@@ -109,7 +119,7 @@ def build(root):
                     raise ValueError('Unexpected game bytecode for ' + name)
                 archive.writestr('res/' + resource + 'c', data)
         with zipfile.ZipFile(staged) as archive:
-            expected_count = len(FILES) + len(PALETTE) + len(MENU_TEXTURES) + len(RESIZE_ICONS) + 1
+            expected_count = len(FILES) + len(PALETTE) + len(MENU_TEXTURES) + len(RESIZE_ICONS) + 3
             if archive.testzip() is not None or len(archive.namelist()) != expected_count:
                 raise ValueError('Corrupt BUI Customizer package')
         staged.replace(target)

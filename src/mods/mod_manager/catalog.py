@@ -43,7 +43,7 @@ PROFILES = {
             number('cooldown_seconds', 'Затримка готовності', 0.5, 0, 5000, 100, 'мс', 1000),
             flag('duplicate_battle_button_enabled', 'Кнопка бою у вікні взводу'),
             flag('keep_window_open', 'Тримати вікно взводу відкритим'),
-            flag('fixed_window_pos', 'Запам’ятовувати позицію вікна'),
+            flag('fixed_window_pos', 'Закріпити вікно на місці'),
             number('solo_invite_delay_min', 'Мінімальна пауза між запрошеннями', 2, 500, 30000, 500, 'мс', 1000),
             number('solo_invite_delay_max', 'Максимальна пауза між запрошеннями', 5, 500, 30000, 500, 'мс', 1000),
         ), power='squad'),

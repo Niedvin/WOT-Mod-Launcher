@@ -2,12 +2,14 @@
   "folder": "09_Research_Button",
   "dir": "research_button",
   "id": "research_button",
-  "manifest_ids": ["ua.research_button"],
+  "manifest_ids": [
+    "ua.research_button"
+  ],
   "title": "Quick Research",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "author": "Niedvin",
   "description": "Кнопка дослідження на середині лівого краю кожної плитки з танком; одразу відкриває дослідження цього танка.",
-  "changes": "Файл-хеш payload не переписується на кожному старті гри.",
+  "changes": "На екранах від 2560×1440 кнопка стоїть з відступом 12 rem, як задумано: Gameface не підтримував попереднє CSS-правило.",
   "default_checked": true,
   "clean_patterns": [
     "ua.research_button*.wotmod"
@@ -33,7 +35,7 @@
     ],
     "outputs": [
       {
-        "to": "build/mods/{ver}/ua.research_button_1.2.5.wotmod"
+        "to": "build/mods/{ver}/ua.research_button_1.2.6.wotmod"
       },
       {
         "to": "build/res_mods/{ver}/gui/gameface/_dist/production/mono/hangar/main/bundle.js"
@@ -42,8 +44,8 @@
   },
   "files": [
     {
-      "source": "build/mods/{ver}/ua.research_button_1.2.5.wotmod",
-      "target": "game_files/mods/_VERSION_/ua.research_button_1.2.5.wotmod"
+      "source": "build/mods/{ver}/ua.research_button_1.2.6.wotmod",
+      "target": "game_files/mods/_VERSION_/ua.research_button_1.2.6.wotmod"
     },
     {
       "source": "build/res_mods/{ver}/gui/gameface/_dist/production/mono/hangar/main/bundle.js",
@@ -67,6 +69,7 @@
     "ua.research_button_1.2.1.wotmod",
     "ua.research_button_1.2.2.wotmod",
     "ua.research_button_1.2.3.wotmod",
-    "ua.research_button_1.2.4.wotmod"
+    "ua.research_button_1.2.4.wotmod",
+    "ua.research_button_1.2.5.wotmod"
   ]
 }

@@ -107,6 +107,10 @@ def key_options():
     return [dict(name=name, label=key_name(name)) for name in ordered]
 
 
+def voice_command(mapping, command):
+    return (mapping.getName(command) or '').startswith('CMD_VOICECHAT_')
+
+
 def native_entries(name):
     codes = native_keys()
     code = codes.get(name)
@@ -115,7 +119,7 @@ def native_entries(name):
     if code is not None:
         for fire, actions in slots.items():
             for command, modifiers, default in actions:
-                if fire == code or code in modifiers:
+                if (fire == code or code in modifiers) and not voice_command(mapping, command):
                     signature = [fire, command, list(modifiers), default]
                     entries.append((signature, native_name(mapping, command)))
     return entries
@@ -206,6 +210,9 @@ class Bindings(object):
                    for identifier, approved in self.state['replaced'].items()
                    if self.installed(identifier) and self.enabled(identifier) and allows_battle_binding(identifier)
                    for item in approved}
+        # User never uses voice chat: its keys stay free for mods in battle — 2026-11-23
+        allowed.update((fire,) + tuple(entry[:1]) + (tuple(entry[1]),) + tuple(entry[2:])
+                       for fire, actions in slots.items() for entry in actions if voice_command(mapping, entry[0]))
         if not allowed:
             return
         filtered = {}

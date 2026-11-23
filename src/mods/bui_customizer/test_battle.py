@@ -25,6 +25,7 @@ try:
     from . import layout
     from . import modes
     from . import overlay
+    from . import rating
     sys.modules['gui.ua_bui'] = sys.modules[__package__]
     sys.modules['gui.ua_bui.battle'] = battle
     from . import entry
@@ -57,6 +58,9 @@ class Clip(object):
 
     def getChildAt(self, index):
         return self.children[index]
+
+    def getChildByName(self, name):
+        return next((child for child in self.children if getattr(child, 'name', None) == name), None)
 
     def getBounds(self, relative_to):
         x = y = 0.0
@@ -111,6 +115,17 @@ class BattleLayoutTest(unittest.TestCase):
         self.hud.bounds.clear()
         self.hud.hit_bounds.clear()
         self.hud.render_widgets(True)
+
+    def test_stock_equipment_uses_the_display_list_instance(self):
+        stage = self.hud.page.flashObject = self.hud.stage
+        displayed = Clip(stage)
+        displayed.name = 'consumablesPanel'
+        stage.consumablesPanel = Clip()
+        ghost = type(str('Component'), (), {'flashObject': Clip()})()
+        self.hud.page.components = {'consumablesPanel': ghost}
+        self.hud.page.getComponent = self.hud.page.components.get
+        self.hud.refresh_widgets()
+        self.assertIs(self.hud.widgets['consumablesPanel'].clip, displayed)
 
     def test_registered_hidden_contents_and_empty_labels_are_not_selectable(self):
         postmortem = self.add('postmortemPanel', width=1000, height=400)
@@ -167,6 +182,52 @@ class BattleLayoutTest(unittest.TestCase):
         line.text = ''
         self.render()
         self.assertNotIn('battleMessenger', self.hud.bounds)
+
+    def test_consumables_use_visible_slot_bounds_and_discard_old_container_preset(self):
+        panel = self.add('consumablesPanel', x=350, y=650, width=430, height=310)
+        slot = Clip(panel, x=10, y=120, width=50, height=200)
+        hit = Clip(slot, y=0, width=50, height=60)
+        hit.name = 'hit'
+        empty = Clip(panel, x=300, y=120, width=55, height=200)
+        hidden_hit = Clip(empty, width=55, height=65)
+        hidden_hit.name = 'hit'
+        empty.visible = False
+        self.hud.state['elements']['consumablesPanel'] = {'normal': [0.1, 0.1, 0.44, 0.38]}
+        self.render()
+        self.assertEqual(self.hud.bounds['consumablesPanel'], (360, 770, 50, 60))
+        self.assertIsNone(self.hud.pick((420, 705))[0])
+
+    def test_rating_hit_rect_excludes_the_gameface_viewport(self):
+        self.hud.page._isInPostmortem = True
+        panel = self.add('postmortemInfoPage', y=600, width=1000, height=200)
+        self.hud.native_visible.clear()
+        previous = rating._rect
+        try:
+            rating.receive(dict(x=.35, y=.7, width=.3, height=.3))
+            self.render()
+            self.assertEqual(self.hud.bounds['postmortemInfoPage'], (350, 740, 300, 60))
+            self.assertIsNone(self.hud.pick((50, 650))[0])
+            self.assertEqual(self.hud.pick((500, 760))[0], 'postmortemInfoPage')
+            panel.visible = False
+            self.render()
+            self.assertNotIn('postmortemInfoPage', self.hud.bounds)
+        finally:
+            rating._rect = previous
+
+    def test_spectator_placement_defers_only_to_customized_equipment(self):
+        panel, moves = object(), []
+        self.hud.page.getComponent = lambda key: panel
+        previous, entry._session = entry._session, self.hud
+        try:
+            position = lambda adapter, panel: moves.append(panel)
+            entry.position_spectator_equipment(position, None, panel)
+            self.hud.state['elements']['consumablesPanel'] = {'slots': [.2, .6, .2, .05]}
+            entry.position_spectator_equipment(position, None, panel)
+            unrelated = object()
+            entry.position_spectator_equipment(position, None, unrelated)
+            self.assertEqual(moves, [panel, unrelated])
+        finally:
+            entry._session = previous
 
     def test_distant_transient_children_do_not_make_a_fullscreen_target(self):
         ribbon = self.add('ribbonsPanel')

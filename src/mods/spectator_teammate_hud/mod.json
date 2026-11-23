@@ -2,12 +2,14 @@
   "folder": "07_Spectator_Teammate_HUD",
   "dir": "spectator_teammate_hud",
   "id": "spectator_teammate_hud",
-  "manifest_ids": ["ua.spectator_teammate_hud"],
+  "manifest_ids": [
+    "ua.spectator_teammate_hud"
+  ],
   "title": "Spectator+",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "author": "Niedvin",
   "description": "Відображає приціл у реальному часі, таймер перезарядки, стан модулів і екіпажу, а також таймери перезарядки спорядження союзника, за яким ви спостерігаєте після знищення вашого танка.",
-  "changes": "Мод працює лише у випадкових боях; в івентових режимах вимкнений.",
+  "changes": "Працює і в генеральних боях; з вимкненим «Перезаряджання спорядження» панель спорядження після смерті ховається, як у грі.",
   "default_checked": true,
   "clean_patterns": [
     "ua.spectator_teammate_hud*.wotmod"
@@ -37,14 +39,14 @@
     ],
     "outputs": [
       {
-        "to": "build/mods/{ver}/ua.spectator_teammate_hud_1.0.14.wotmod"
+        "to": "build/mods/{ver}/ua.spectator_teammate_hud_1.0.15.wotmod"
       }
     ]
   },
   "files": [
     {
-      "source": "build/mods/{ver}/ua.spectator_teammate_hud_1.0.14.wotmod",
-      "target": "game_files/mods/_VERSION_/ua.spectator_teammate_hud_1.0.14.wotmod"
+      "source": "build/mods/{ver}/ua.spectator_teammate_hud_1.0.15.wotmod",
+      "target": "game_files/mods/_VERSION_/ua.spectator_teammate_hud_1.0.15.wotmod"
     },
     {
       "source": "mods/configs/spectator_teammate_hud/config.json",
@@ -65,6 +67,7 @@
     "ua.spectator_teammate_hud_1.0.10.wotmod",
     "ua.spectator_teammate_hud_1.0.11.wotmod",
     "ua.spectator_teammate_hud_1.0.12.wotmod",
-    "ua.spectator_teammate_hud_1.0.13.wotmod"
+    "ua.spectator_teammate_hud_1.0.13.wotmod",
+    "ua.spectator_teammate_hud_1.0.14.wotmod"
   ]
 }

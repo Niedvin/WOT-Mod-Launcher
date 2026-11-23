@@ -7,7 +7,7 @@ import BigWorld
 from PlayerEvents import g_playerEvents
 from debug_utils import LOG_NOTE, LOG_CURRENT_EXCEPTION
 
-_MOD_VERSION = '1.0.7'
+_MOD_VERSION = '1.0.8'
 _CONFIG_DIR = os.path.abspath(os.path.join('mods', 'configs', 'background_fps_limiter'))
 _CONFIG_PATH = os.path.join(_CONFIG_DIR, 'config.json')
 
@@ -22,6 +22,8 @@ _DEFAULT_CONFIG = {
 _FOCUSED_FPS_DEFAULT = 240
 _FOCUSED_FPS_MIN = 30
 _FOCUSED_FPS_MAX = 240
+# engine_config.xml maxFrameRate: client cap when no mod limits it — 2026-11-23
+_NATIVE_FPS_LIMIT = 1000
 
 _TICK_INTERVAL = 1.0
 _WATCHDOG_INTERVAL = 3.0
@@ -177,11 +179,11 @@ def _background_limit():
 
 def _target_limit(focused):
     if not _CONFIG.get('enabled', True):
-        return False, _focused_limit()
+        return False, _NATIVE_FPS_LIMIT
     in_battle = _is_in_battle()
     allowed = _CONFIG.get('enable_in_battle', True) if in_battle else _CONFIG.get('enable_in_hangar', True)
     if not allowed:
-        return False, _focused_limit()
+        return False, _NATIVE_FPS_LIMIT
     if focused:
         return True, _focused_limit()
     return True, _background_limit()
@@ -372,7 +374,7 @@ def fini():
     g_playerEvents.onAvatarBecomePlayer -= _on_avatar_become_player
     try:
         if _applied_limit is not None:
-            BigWorld.wg_setMaxFrameRate(_focused_limit())
+            BigWorld.wg_setMaxFrameRate(_NATIVE_FPS_LIMIT)
         _last_limit = None
         _applied_limit = None
     except Exception:

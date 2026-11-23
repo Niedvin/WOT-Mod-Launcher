@@ -11,7 +11,7 @@ from mono_build import build as build_mono, game_version, MEMBER
 
 ROOT = Path(__file__).resolve().parents[2]
 WORK = Path(__file__).resolve().parent
-VERSION = '1.2.5'
+VERSION = '1.2.6'
 MOD_ID = 'ua.research_button'
 MOD_NAME = '%s_%s.wotmod' % (MOD_ID, VERSION)
 ENTRY = 'res/scripts/client/gui/mods/mod_research_button.pyc'
@@ -59,7 +59,7 @@ def main(install=False):
             shutil.copy2(live_config if live_config.exists() else WORK / 'config.json', config)
     info_path = STAGING / 'info.json'
     info = json.loads(info_path.read_text(encoding='utf-8-sig'))
-    info.update(version=VERSION, description='Кнопка дослідження на середині лівого краю кожної плитки з танком; одразу відкриває дослідження цього танка.', changes='Відступ 8–12 rem від краю картки; окремий внутрішній відступ навколо дерева досліджень.',
+    info.update(version=VERSION, description='Кнопка дослідження на середині лівого краю кожної плитки з танком; одразу відкриває дослідження цього танка.', changes='На екранах від 2560×1440 кнопка стоїть з відступом 12 rem, як задумано.',
                 clean_res_mods=[MEMBER, 'gui/flash/TankCarousel.swf', 'gui/maps/icons/buttons/ua_research_btn.png'])
     info['size_bytes'] = sum(path.stat().st_size for path in (STAGING / 'game_files').rglob('*') if path.is_file())
     info_path.write_text(json.dumps(info, ensure_ascii=False, indent=4) + '\n', encoding='utf-8')

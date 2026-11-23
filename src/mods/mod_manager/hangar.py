@@ -236,6 +236,13 @@ def open_legacy(*args):
     view_model = _current
     if view_model is not None:
         view_model.request({'action': 'open'})
+        return
+    try:
+        from gui import SystemMessages
+        SystemMessages.pushMessage(u'Менеджер модів відкривається в ангарі випадкових боїв.',
+                                   type=SystemMessages.SM_TYPE.Information)
+    except Exception:
+        LOGGER.exception('Cannot report the unavailable mod manager')
 
 
 class ManagerFooterModel(lobby_footer.DefaultModel):

@@ -1127,14 +1127,14 @@ def _update_spectator_hud(vehicle_id):
 
 
 def _is_supported_battle():
-    # Spectator+ runs in random battles only, event modes keep their own HUD — 2026-11-18
+    # Random and grand battles only, event modes keep their own HUD — 2026-11-23
     try:
         from constants import ARENA_GUI_TYPE
         player = BigWorld.player() if BigWorld is not None else None
         arena = getattr(player, 'arena', None)
         if arena is None:
             return False
-        return getattr(arena, 'guiType', None) == ARENA_GUI_TYPE.RANDOM
+        return getattr(arena, 'guiType', None) in ARENA_GUI_TYPE.RANDOM_RANGE
     except Exception:
         return False
 
@@ -1175,7 +1175,7 @@ def _on_spectate_vehicle(vehicle_id):
     _aim_manager.enable(vehicle_id)
     _run_hud_step('crosshair view', lambda: _refresh_crosshair_view(player))
     page = _active_battle_page() if _active_battle_page is not None else None
-    if page is not None:
+    if page is not None and _CONFIG.get('show_consumables_cooldown', True):
         _run_hud_step('panel visibility', lambda: _hud_adapter.prevent_consumables_hide(page))
     _update_spectator_hud(vehicle_id)
     _start_aim_ticker()
@@ -1252,7 +1252,7 @@ def _hooked_page_dispose(self):
 def _hooked_page_switchToPostmortem(self):
     res = _orig_page_switchToPostmortem(self)
     try:
-        if _CONFIG.get('enabled', True) and _aim_manager.is_active():
+        if _CONFIG.get('enabled', True) and _CONFIG.get('show_consumables_cooldown', True) and _aim_manager.is_active():
             _hud_adapter.prevent_consumables_hide(self)
     except Exception:
         pass
@@ -1582,7 +1582,7 @@ def init():
 
     try:
         from debug_utils import LOG_NOTE
-        LOG_NOTE('[SpectatorHUD] 1.0.13 initialized')
+        LOG_NOTE('[SpectatorHUD] 1.0.15 initialized')
     except Exception:
         pass
 
