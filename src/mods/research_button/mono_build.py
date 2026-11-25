@@ -6,12 +6,30 @@ from pathlib import Path
 import re
 import zipfile
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path.cwd()
 MEMBER = 'gui/gameface/_dist/production/mono/hangar/main/bundle.js'
 NEEDLE = 'navigateTo:e.createCallback(e=>({entry:e}),"onNavigate")'
 REPLACE = 'navigateTo:(window.__uaNavigate=e.createCallback(e=>({entry:e}),"onNavigate"))'
-CARD_NEEDLE = 'children:[(0,ti.jsx)(_,{vehicle:o,validBP:un(m,p,l),dimmed:u,statistic:l,selected:t,doubleRow:a})'
-CARD_BUTTON = 'children:[(r.className||"").indexOf("Carousel_card_")!==-1&&(0,ti.jsx)(Y,{className:"uaResearchBtn"+(a?" uaResearchBtn__double":""),classNames:{border:"uaResearchBorder",background:"uaResearchBg"},type:"button",size:Y.sizes.extraSmall,theme:Y.themes.secondary,autoAlignContent:!1,disabled:u,title:"\u0414\u043e\u0441\u043b\u0456\u0434\u0438\u0442\u0438",onMouseDown:t=>t.stopPropagation(),onClick:t=>{t.preventDefault();t.stopPropagation();if(typeof window.__uaNavigate==="function")window.__uaNavigate("ua.research:"+e)},children:(0,ti.jsx)("img",{className:"uaResearchGlyph",src:__UA_ICON__,alt:"",draggable:!1})}),(0,ti.jsx)(_,{vehicle:o,validBP:un(m,p,l),dimmed:u,statistic:l,selected:t,doubleRow:a})'
+CARD_PATTERN = re.compile(
+    r'children:\[(?P<jsx>\(0,[$\w]+\.jsx\))\([$\w]+,'
+    r'\{vehicle:o,validBP:[$\w]+\(m,p,l\),dimmed:u,statistic:l,selected:t,doubleRow:a\}\)'
+)
+LIBRARY_IMPORT = re.compile(r'import\{([^{}]+)\}from"\.\./chunks/lib\.js"')
+CARD_BUTTON = '''
+  (r.className || "").includes("Carousel_card_") && __JSX__(__BUTTON__, {
+    className: "uaResearchBtn" + (a ? " uaResearchBtn__double" : ""),
+    classNames: {border: "uaResearchBorder", background: "uaResearchBg"},
+    type: "button", size: __BUTTON__.sizes.extraSmall, theme: __BUTTON__.themes.secondary,
+    autoAlignContent: false, disabled: u, title: "Дослідити",
+    onMouseDown: event => event.stopPropagation(),
+    onClick: event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof window.__uaNavigate === "function") window.__uaNavigate("ua.research:" + e);
+    },
+    children: __JSX__("img", {className: "uaResearchGlyph", src: __UA_ICON__, alt: "", draggable: false})
+  }),
+'''
 INJECTOR = r'''
 ;(function(){
   if(document.getElementById('uaResearchStyle')){return;}
@@ -36,22 +54,30 @@ def data_image(data):
 def build():
     with zipfile.ZipFile(ROOT / 'res/packages/gui-part2.pkg') as archive:
         original = archive.read(MEMBER).decode('utf-8')
-    if original.count(NEEDLE) != 1 or original.count(CARD_NEEDLE) != 1:
+    cards = list(CARD_PATTERN.finditer(original))
+    if original.count(NEEDLE) != 1 or len(cards) != 1:
         raise ValueError('Unsupported hangar bundle: callback or vehicle-card component changed')
     with zipfile.ZipFile(ROOT / 'res/packages/gui-part1.pkg') as archive:
         library = archive.read('gui/gameface/_dist/production/mono/hangar/chunks/lib.js').decode('utf-8')
+    export = re.search(r'\bButton\$1 as ([$\w]+)', library)
+    imports = LIBRARY_IMPORT.search(original)
+    button = re.search(r'(?:^|,)' + re.escape(export[1]) + r' as ([$\w]+)(?:,|$)', imports[1]) if export and imports else None
+    if not button:
+        raise ValueError('Unsupported native Button export')
     with zipfile.ZipFile(ROOT / 'res/packages/gui-part4.pkg') as archive:
         icon = archive.read('gui/maps/icons/vehPostProgression/tooltips/veh_skill_tree_bonus.png')
-    if 'In as Y' not in original or 'Button$1 as In' not in library:
-        raise ValueError('Unsupported native Button export')
-    card = CARD_BUTTON.replace('__UA_ICON__', data_image(icon))
-    result = original.replace(NEEDLE, REPLACE, 1).replace(CARD_NEEDLE, card, 1) + INJECTOR
+    card = cards[0]
+    insert_at = card.start('jsx')
+    addition = (CARD_BUTTON.replace('__JSX__', card['jsx'])
+                .replace('__BUTTON__', button[1])
+                .replace('__UA_ICON__', data_image(icon)))
+    result = (original[:insert_at] + addition + original[insert_at:]).replace(NEEDLE, REPLACE, 1) + INJECTOR
+    assert result.count('className: "uaResearchGlyph"') == 1
+    assert 'window.__uaNavigate("ua.research:" + e)' in result
     output = Path(__file__).with_name('out_mono') / 'bundle.js'
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_suffix('.building.js')
     temporary.write_bytes(result.encode('utf-8'))
-    assert result.count('className:"uaResearchGlyph"') == 1
-    assert 'window.__uaNavigate("ua.research:"+e)' in result
     os.replace(temporary, output)
     print('MONO', len(result.encode('utf-8')), hashlib.sha256(output.read_bytes()).hexdigest())
     return output

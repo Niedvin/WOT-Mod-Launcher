@@ -24,6 +24,14 @@ def metadata(path):
     return root.findtext('id'), root.findtext('version')
 
 
+def game_version(game_root):
+    root = ElementTree.parse(game_root / 'version.xml').getroot()
+    match = re.search(r'\bv\.(\d+(?:\.\d+){3})(?=\s|$)', root.findtext('version', ''))
+    if not match:
+        raise ValueError('Invalid game version in version.xml')
+    return match.group(1)
+
+
 def locate_package(root, record):
     name = record['file']
     if not re.fullmatch(r'[a-zA-Z0-9_.-]+\.wotmod', name):
@@ -35,14 +43,39 @@ def locate_package(root, record):
     raise FileNotFoundError('Verified package missing: ' + name)
 
 
-def prepare(previous_manifest, game_root, manager, pack_version, output):
+def replacement_packages(records, packages, game):
+    families = {}
+    for record in records:
+        suffix = f"_{record['version']}.wotmod"
+        if record['file'].endswith(suffix):
+            families[record['file'].removesuffix(suffix)] = record['id']
+
+    updates = {}
+    for path in packages:
+        mod_id, version = metadata(path)
+        if not version or not re.fullmatch(r'\d+(?:\.\d+)+', version):
+            raise ValueError('Invalid replacement version: ' + path.name)
+        suffix = f'_{version}.wotmod'
+        family = path.name.removesuffix(suffix)
+        record_id = families.get(family)
+        if not path.name.endswith(suffix) or record_id is None or mod_id not in (family, record_id):
+            raise ValueError('Unexpected replacement package: ' + path.name)
+        if record_id in updates:
+            raise ValueError('Duplicate replacement: ' + record_id)
+        updates[record_id] = (path, dict(
+            version=version, file=path.name, sha256=sha(path), size=path.stat().st_size,
+            changes=f'Сумісність із World of Tanks EU {game}.',
+        ))
+    return updates
+
+
+def prepare(previous_manifest, game_root, manager, pack_version, output, packages=(), launcher=None,
+            launcher_version=None):
     if not re.fullmatch(r'[0-9]+(?:\.[0-9]+)+', pack_version):
         raise ValueError('Invalid pack version')
     with previous_manifest.open(encoding='utf-8-sig') as handle:
         previous = json.load(handle)
-    version = previous['game_version']
-    if not re.fullmatch(r'[0-9]+(?:\.[0-9]+){3}', version):
-        raise ValueError('Invalid game version')
+    version = game_version(game_root)
     active = game_root / 'mods' / version
     base = RELEASES + '/download/pack-' + pack_version
     mod_id, mod_version = metadata(manager)
@@ -50,10 +83,22 @@ def prepare(previous_manifest, game_root, manager, pack_version, output):
         raise ValueError('Unexpected mod manager identity')
     manifest = dict(schema=1, pack_version=pack_version, game_version=version, mods=[])
     attachments = {}
-    for record in previous['mods']:
-        if record['id'] in RETIRED:
-            continue
-        path = locate_package(active, record)
+    if launcher or launcher_version:
+        if not launcher or not launcher_version or not re.fullmatch(r'\d+(?:\.\d+){3}', launcher_version):
+            raise ValueError('Set both launcher path and valid launcher version')
+        launcher_name = 'WotModLauncher.exe'
+        manifest['launcher'] = dict(version=launcher_version, url=base + '/' + launcher_name, sha256=sha(launcher))
+        attachments[launcher_name] = launcher
+    elif previous.get('launcher'):
+        manifest['launcher'] = previous['launcher']
+    records = [record for record in previous['mods'] if record['id'] not in RETIRED]
+    updates = replacement_packages(records, packages, version)
+    for record in records:
+        if record['id'] in updates:
+            path, fields = updates[record['id']]
+            record = dict(record, **fields)
+        else:
+            path = locate_package(active, record)
         subdir = record.get('subdir', '').replace('\\', '/')
         if subdir and any(not re.fullmatch(r'[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)*', part)
                           for part in subdir.split('/')):
@@ -61,11 +106,15 @@ def prepare(previous_manifest, game_root, manager, pack_version, output):
         name = record['file']
         manifest['mods'].append(dict(record, subdir=subdir, url=base + '/' + name))
         attachments[name] = path
+    prior_manager = next((record for record in previous['mods'] if record['id'] == mod_id), {})
+    manager_changes = prior_manager.get('changes', '') if prior_manager.get('version') == mod_version else (
+        f'Сумісність із World of Tanks EU {version}.'
+    )
     manifest['mods'].insert(0, dict(
         id=mod_id, title='Niedvin Mod Manager', version=mod_version, file=manager.name,
         subdir='', url=base + '/' + manager.name, sha256=sha(manager), size=manager.stat().st_size,
         default_checked=True, possible_cheat=False, possible_cheat_note='',
-        changes='Continuous scrolling, a hangar footer button, one-click restart and automatic migration.',
+        changes=manager_changes,
     ))
     attachments[manager.name] = manager
     output.mkdir(parents=True)
@@ -92,8 +141,12 @@ def main():
     parser.add_argument('--manager', type=Path, required=True)
     parser.add_argument('--pack-version', required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--package', type=Path, action='append', default=[])
+    parser.add_argument('--launcher', type=Path)
+    parser.add_argument('--launcher-version')
     options = parser.parse_args()
-    manifest = prepare(options.previous_manifest, options.game_root, options.manager, options.pack_version, options.output)
+    manifest = prepare(options.previous_manifest, options.game_root, options.manager, options.pack_version,
+                       options.output, options.package, options.launcher, options.launcher_version)
     print('Prepared %s packages at %s' % (len(manifest['mods']), options.output))
 
 

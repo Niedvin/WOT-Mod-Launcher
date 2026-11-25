@@ -1,6 +1,6 @@
 # Niedvin Modpack for World of Tanks EU
 
-Download [the current modpack](https://github.com/Niedvin/WOT-Mod-Launcher/releases/latest) for World of Tanks EU 2.4.1.1.
+Download [the current modpack](https://github.com/Niedvin/WOT-Mod-Launcher/releases/latest) for World of Tanks EU 2.4.2.
 
 1. Close World of Tanks and extract the `mods` folder from `Niedvin_WoT_Modpack.zip` into the game folder beside `version.xml`.
 2. Start the game from Wargaming Game Center. The **Моди** button is in the hangar footer, to the left of the system icons.

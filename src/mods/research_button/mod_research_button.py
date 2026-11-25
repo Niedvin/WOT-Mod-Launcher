@@ -7,7 +7,7 @@ _CONFIG_PATH = os.path.join('mods', 'configs', 'research_button', 'config.json')
 _CONFIG = {'enabled': True}
 _HOOKS = []
 _REQUEST = 'ua.research'
-_VERSION = '1.2.6'
+_VERSION = '1.2.7'
 _KNOWN_BUNDLE_HASHES = ('276aec093f9873fa482fcce3b8490dc7f75d10dc52cb660cd140a08a0261a23a', '323595a4d8e930f1bf59e3eddb500331e507130ea3b6e36d9cf1b4fbe3aec24f', '6d70c7aa531503931c2caa68617eea67315bc9e8c9c96ae746a854695bf0b55b', '06faf1d78ababe0c81aec9a093bad96084dac4d10898aa0edbb1b7284788f8f9', '07979105c0c19ad22ae28b1b1f0987d904661adbe57ba0131427eed424e043a7', '1517f93026e78103183cbc764ff210707800a9c8912304273c1109743dfd50aa', '1bea21940e6a62874a2f326947aa44856c7422e40883ebd8e853b60ec818d62c', 'c4882ff70a71a36d03b30d1bfb14170b0096526a9b2148db66caf4c32dd7c404')
 
 
@@ -35,7 +35,6 @@ def _ensure_packaged_file(mod_id, mod_version, member, target, accepted_sha256=N
         with open(target, 'rb') as stream:
             current = stream.read()
         if current == data:
-            # Game start is the common path: rewrite the sidecar only when it is missing or stale
             if accepted_sha256 is not None and recorded_sha256 != desired_sha256:
                 with open(state_path, 'wb') as stream:
                     stream.write(desired_sha256)

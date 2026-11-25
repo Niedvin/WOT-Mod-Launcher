@@ -22,8 +22,8 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("Niedvin")]
 [assembly: AssemblyProduct("WoT Modpack by Niedvin")]
 [assembly: AssemblyCopyright("Copyright © 2026 Niedvin")]
-[assembly: AssemblyFileVersion("1.4.3.10")]
-[assembly: AssemblyVersion("1.4.3.10")]
+[assembly: AssemblyFileVersion("1.4.3.11")]
+[assembly: AssemblyVersion("1.4.3.11")]
 
 namespace WotModLauncher
 {
@@ -126,6 +126,7 @@ namespace WotModLauncher
         public const string RepoOwner = "Niedvin";
         public const string RepoName = "WOT-Mod-Launcher";
         public const string ManifestUrl = "https://github.com/Niedvin/WOT-Mod-Launcher/releases/latest/download/manifest.json";
+        internal const string DisabledPackageSuffix = ".manager-off";
         public static readonly string LauncherVersion = Assembly.GetExecutingAssembly().GetName().Version.ToString();
         public static string ManifestOverride;
         public static string ManifestLocalDir;
@@ -325,24 +326,20 @@ namespace WotModLauncher
             string gameVer = DetectGameVersion(cfg.game_path);
             RestoreDisabledMods(cfg.game_path);
             List<string> declinedMods = LoadDeclinedMods();
-            if (!string.IsNullOrEmpty(gameVer))
-                SyncVersionFolderIfEmpty(cfg.game_path, gameVer, declinedMods);
 
-            string activeVer = gameVer;
             bool applyLauncherUpdate = true;
             SelfUpdateState selfUpdatePlan = null;
             ManifestRoot manifest = manifestThread.Join(6000) ? SanitizeManifest(fetchedManifest) : null;
             if (manifest != null)
             {
                 selfUpdatePlan = GetSelfUpdatePlan(manifest.launcher);
-                if (string.IsNullOrEmpty(activeVer)) activeVer = manifest.game_version;
-                List<PendingModUpdate> catalog = ScanModCatalog(cfg.game_path, activeVer, manifest);
+                List<PendingModUpdate> catalog = PrepareModCatalog(cfg.game_path, gameVer, manifest, declinedMods);
                 List<PendingModUpdate> updates = SelectPendingUpdates(catalog, cfg.skip_mods, declinedMods);
                 if (selfUpdatePlan == null && !checkOnly && !updateOnly)
                     selfUpdatePlan = LoadPendingUpdateState();
                 if (!checkOnly && (updates.Count > 0 || selfUpdatePlan != null || catalog.Any(item => item.IsNew)))
                 {
-                    using (var form = new UpdateDialogForm(cfg.game_path, activeVer, updates, selfUpdatePlan, LauncherDir, catalog))
+                    using (var form = new UpdateDialogForm(cfg.game_path, gameVer, updates, selfUpdatePlan, LauncherDir, catalog))
                     {
                         Application.Run(form);
                         applyLauncherUpdate = form.ApplyLauncherUpdate;
@@ -487,49 +484,100 @@ namespace WotModLauncher
             return null;
         }
 
-        public static void SyncVersionFolderIfEmpty(string gamePath, string activeVer, List<string> choices = null)
+        internal static List<PendingModUpdate> PrepareModCatalog(string gamePath, string gameVer, ManifestRoot manifest, List<string> declinedMods)
         {
+            if (manifest == null || manifest.mods == null || string.IsNullOrEmpty(gameVer) ||
+                !string.Equals(gameVer, manifest.game_version, StringComparison.Ordinal))
+                return new List<PendingModUpdate>();
+
+            SyncVersionFolderIfEmpty(gamePath, gameVer, manifest.mods, declinedMods);
+            return ScanModCatalog(gamePath, gameVer, manifest);
+        }
+
+        private static void SyncVersionFolderIfEmpty(string gamePath, string activeVer, List<ManifestModEntry> entries, List<string> choices)
+        {
+            Version activeVersion;
+            if (!Version.TryParse(activeVer, out activeVersion) || entries.Count == 0) return;
+            var copied = new List<string>();
             try
             {
-                string modsRoot = Path.Combine(gamePath, "mods");
-                if (!Directory.Exists(modsRoot)) return;
-                string targetDir = Path.Combine(modsRoot, activeVer);
-                if (Directory.Exists(targetDir) && Directory.GetFiles(targetDir, "*.wotmod", SearchOption.AllDirectories).Length > 0)
-                    return;
-
-                Version bestV = new Version(0, 0, 0, 0);
-                string sourceDir = null;
-                foreach (string d in Directory.GetDirectories(modsRoot))
+                using (Mutex mutex = LockModChanges())
                 {
-                    string name = Path.GetFileName(d);
-                    if (name == activeVer || !Regex.IsMatch(name, @"^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$")) continue;
-                    if (Directory.GetFiles(d, "*.wotmod", SearchOption.AllDirectories).Length == 0) continue;
-                    Version v;
-                    if (Version.TryParse(name, out v) && v > bestV)
+                    try
                     {
-                        bestV = v;
-                        sourceDir = d;
-                    }
-                }
-                if (sourceDir == null) return;
+                        string modsRoot = Path.Combine(gamePath, "mods");
+                        if (!Directory.Exists(modsRoot)) return;
+                        string targetDir = Path.Combine(modsRoot, activeVer);
+                        if (FindPackageFiles(targetDir, SearchOption.AllDirectories).Any()) return;
 
-                var removed = new HashSet<string>((choices ?? new List<string>())
-                    .Where(value => value != null && value.StartsWith("removed:", StringComparison.OrdinalIgnoreCase))
-                    .Select(value => value.Substring("removed:".Length)), StringComparer.OrdinalIgnoreCase);
-                foreach (string file in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
-                {
-                    if (removed.Count > 0 && string.Equals(Path.GetExtension(file), ".wotmod", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string id = ReadWotmodId(file) ?? PackageFilenameId(Path.GetFileName(file));
-                        if (removed.Contains(id)) continue;
+                        Version previousVersion = null;
+                        string[] previousFiles = new string[0];
+                        foreach (string directory in Directory.GetDirectories(modsRoot))
+                        {
+                            Version version;
+                            if (!Version.TryParse(Path.GetFileName(directory), out version) || version.Revision < 0 ||
+                                version >= activeVersion || (previousVersion != null && version <= previousVersion))
+                                continue;
+                            string[] packages = FindPackageFiles(directory, SearchOption.AllDirectories).ToArray();
+                            if (packages.Length == 0) continue;
+                            previousVersion = version;
+                            previousFiles = packages;
+                        }
+                        var byName = previousFiles.OrderBy(IsDisabledPackage)
+                            .ToLookup(file => Path.GetFileName(EnabledPackagePath(file)), StringComparer.OrdinalIgnoreCase);
+                        foreach (ManifestModEntry entry in LatestModEntries(entries))
+                        {
+                            if (IsSkipped(choices, "removed:" + entry.id)) continue;
+                            string source = byName[entry.file].FirstOrDefault(file => VerifySha256(file, entry.sha256));
+                            if (source == null) continue;
+
+                            string relativeDir = (entry.subdir ?? "").Replace('/', Path.DirectorySeparatorChar);
+                            string filename = entry.file + (IsDisabledPackage(source) ? DisabledPackageSuffix : "");
+                            string destination = Path.Combine(targetDir, relativeDir, filename);
+                            Directory.CreateDirectory(Path.GetDirectoryName(destination));
+                            string staged = destination + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                            try
+                            {
+                                File.Copy(source, staged);
+                                if (!VerifySha256(staged, entry.sha256))
+                                    throw new IOException("Пакет змінився під час перенесення: " + entry.file);
+                                File.Move(staged, destination);
+                                copied.Add(destination);
+                            }
+                            finally { TryDeleteFile(staged); }
+                        }
                     }
-                    string rel = file.Substring(sourceDir.Length).TrimStart('\\', '/');
-                    string dst = Path.Combine(targetDir, rel);
-                    Directory.CreateDirectory(Path.GetDirectoryName(dst));
-                    File.Copy(file, dst, true);
+                    catch
+                    {
+                        foreach (string file in copied) TryDeleteFile(file);
+                        throw;
+                    }
+                    finally { mutex.ReleaseMutex(); }
                 }
             }
             catch { }
+        }
+
+        internal static bool IsDisabledPackage(string path)
+        {
+            return path.EndsWith(".wotmod" + DisabledPackageSuffix, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string EnabledPackagePath(string path)
+        {
+            return IsDisabledPackage(path) ? path.Substring(0, path.Length - DisabledPackageSuffix.Length) : path;
+        }
+
+        private static bool IsPackageFile(string path)
+        {
+            return string.Equals(Path.GetExtension(EnabledPackagePath(path)), ".wotmod", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static IEnumerable<string> FindPackageFiles(string directory, SearchOption search)
+        {
+            return Directory.Exists(directory)
+                ? Directory.EnumerateFiles(directory, "*.wotmod*", search).Where(IsPackageFile)
+                : Enumerable.Empty<string>();
         }
 
         private static ManifestRoot FetchManifestWithTimeout(int timeoutMs)
@@ -994,6 +1042,19 @@ namespace WotModLauncher
             }).ToList();
         }
 
+        private static IEnumerable<ManifestModEntry> LatestModEntries(IEnumerable<ManifestModEntry> candidates)
+        {
+            var entries = new Dictionary<string, ManifestModEntry>(StringComparer.OrdinalIgnoreCase);
+            foreach (ManifestModEntry candidate in candidates)
+            {
+                if (!IsValidManifestMod(candidate)) continue;
+                ManifestModEntry previous;
+                if (!entries.TryGetValue(candidate.id, out previous) || Quad(ParseVer(candidate.version)) > Quad(ParseVer(previous.version)))
+                    entries[candidate.id] = candidate;
+            }
+            return entries.Values;
+        }
+
         internal static List<PendingModUpdate> ScanModCatalog(string gamePath, string gameVer, ManifestRoot manifest)
         {
             var result = new List<PendingModUpdate>();
@@ -1002,21 +1063,10 @@ namespace WotModLauncher
                 return result;
 
             string verRoot = Path.Combine(gamePath, "mods", gameVer);
-            var entries = new Dictionary<string, ManifestModEntry>(StringComparer.OrdinalIgnoreCase);
-            foreach (ManifestModEntry candidate in manifest.mods)
-            {
-                if (!IsValidManifestMod(candidate)) continue;
-                ManifestModEntry previous;
-                if (!entries.TryGetValue(candidate.id, out previous) || Quad(ParseVer(candidate.version)) > Quad(ParseVer(previous.version)))
-                    entries[candidate.id] = candidate;
-            }
-
-            foreach (var directory in entries.Values.GroupBy(entry => entry.subdir ?? "", StringComparer.OrdinalIgnoreCase))
+            foreach (var directory in LatestModEntries(manifest.mods).GroupBy(entry => entry.subdir ?? "", StringComparer.OrdinalIgnoreCase))
             {
                 string searchDir = Path.Combine(verRoot, directory.Key.Replace('/', Path.DirectorySeparatorChar));
-                string[] files = Directory.Exists(searchDir)
-                    ? Directory.GetFiles(searchDir, "*.wotmod", SearchOption.TopDirectoryOnly)
-                    : new string[0];
+                string[] files = FindPackageFiles(searchDir, SearchOption.TopDirectoryOnly).OrderBy(IsDisabledPackage).ToArray();
                 var identities = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (ManifestModEntry entry in directory)
                 {
@@ -1026,7 +1076,7 @@ namespace WotModLauncher
                     string filenameId = PackageFilenameId(entry.file);
                     foreach (string file in files)
                     {
-                        Match name = Regex.Match(Path.GetFileName(file), @"^(.+?)_([vV]?[0-9]+(?:\.[0-9]+)*)\.wotmod$", RegexOptions.IgnoreCase);
+                        Match name = Regex.Match(Path.GetFileName(EnabledPackagePath(file)), @"^(.+?)_([vV]?[0-9]+(?:\.[0-9]+)*)\.wotmod$", RegexOptions.IgnoreCase);
                         if (!name.Success) continue;
                         Version version = ParseVer(name.Groups[2].Value);
                         if (version == null) continue;
@@ -1095,7 +1145,7 @@ namespace WotModLauncher
                     {
                         string file = Path.GetFullPath(path);
                         if (!file.StartsWith(versionRoot, StringComparison.OrdinalIgnoreCase) ||
-                            !string.Equals(Path.GetExtension(file), ".wotmod", StringComparison.OrdinalIgnoreCase))
+                            !IsPackageFile(file))
                             throw new InvalidDataException("Файл поза папкою модів: " + file);
                         for (string part = file; !string.Equals(part, modsRoot, StringComparison.OrdinalIgnoreCase); part = Path.GetDirectoryName(part))
                         {
@@ -2429,7 +2479,8 @@ namespace WotModLauncher
                     else
                     {
                         if (!backupReady) { Directory.CreateDirectory(bkpDir); backupReady = true; }
-                        string newDestPath = Path.Combine(destDir, remote.file);
+                        string filename = remote.file + (Program.IsDisabledPackage(update.LocalFilePath) ? Program.DisabledPackageSuffix : "");
+                        string newDestPath = Path.Combine(destDir, filename);
                         string relOld = GetBackupRelativePath(update.LocalFilePath);
                         string bkpFile = Path.Combine(bkpDir, relOld);
 

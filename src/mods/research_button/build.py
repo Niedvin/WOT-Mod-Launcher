@@ -7,11 +7,10 @@ import struct
 import subprocess
 import sys
 import zipfile
-from mono_build import build as build_mono, game_version, MEMBER
+from mono_build import build as build_mono, game_version, MEMBER, ROOT
 
-ROOT = Path(__file__).resolve().parents[2]
 WORK = Path(__file__).resolve().parent
-VERSION = '1.2.6'
+VERSION = '1.2.7'
 MOD_ID = 'ua.research_button'
 MOD_NAME = '%s_%s.wotmod' % (MOD_ID, VERSION)
 ENTRY = 'res/scripts/client/gui/mods/mod_research_button.pyc'
@@ -49,18 +48,21 @@ def main(install=False):
         destination = base / MEMBER
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(bundle, destination)
-    for directory in [STAGING / 'game_files/mods/configs/research_button'] + ([ROOT / 'mods/configs/research_button'] if install else []):
+    live_config = ROOT / 'mods/configs/research_button/config.json'
+    config_data = live_config.read_bytes() if live_config.is_file() else b'{"enabled": true}\n'
+    for directory in [STAGING / 'game_files/mods/configs/research_button'] + ([live_config.parent] if install else []):
         directory.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, directory / source.name)
         shutil.copy2(source.with_suffix('.pyc'), directory / source.with_suffix('.pyc').name)
-        live_config = ROOT / 'mods/configs/research_button/config.json'
         config = directory / 'config.json'
-        if directory != live_config.parent:
-            shutil.copy2(live_config if live_config.exists() else WORK / 'config.json', config)
+        if config != live_config or not config.exists():
+            config.write_bytes(config_data)
     info_path = STAGING / 'info.json'
-    info = json.loads(info_path.read_text(encoding='utf-8-sig'))
-    info.update(version=VERSION, description='Кнопка дослідження на середині лівого краю кожної плитки з танком; одразу відкриває дослідження цього танка.', changes='На екранах від 2560×1440 кнопка стоїть з відступом 12 rem, як задумано.',
-                clean_res_mods=[MEMBER, 'gui/flash/TankCarousel.swf', 'gui/maps/icons/buttons/ua_research_btn.png'])
+    metadata = json.loads((WORK / 'mod.json').read_text(encoding='utf-8'))
+    info = json.loads(info_path.read_text(encoding='utf-8-sig')) if info_path.is_file() else {}
+    for field in ('id', 'title', 'version', 'author', 'description', 'changes', 'default_checked',
+                  'manifest_ids', 'clean_patterns', 'clean_res_mods'):
+        info[field] = metadata[field]
     info['size_bytes'] = sum(path.stat().st_size for path in (STAGING / 'game_files').rglob('*') if path.is_file())
     info_path.write_text(json.dumps(info, ensure_ascii=False, indent=4) + '\n', encoding='utf-8')
     print('PACKAGE', package, 'SHA256', hashlib.sha256(package.read_bytes()).hexdigest())

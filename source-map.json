@@ -14,6 +14,7 @@
     "src/build/app.ico": "scratch/app.ico",
     "src/mods/research_button/build.py": "scratch/research_btn/build.py",
     "src/mods/research_button/mono_build.py": "scratch/research_btn/mono_build.py",
+    "src/mods/research_button/mod.json": "scratch/research_btn/mod.json",
     "src/mods/research_button/mod_research_button.py": "scratch/research_btn/mod_research_button.py",
     "src/mods/research_button/research_action.png": "scratch/research_btn/research_action.png",
     "src/mods/background_fps_limiter/build.py": "scratch/background_fps/build.py",

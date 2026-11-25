@@ -74,11 +74,62 @@ public static class LauncherLogicTest
             throw new Exception("mods were not merged back");
 
         TestGroupsAndDecline(game, verDir);
+        TestGameVersionGate(Path.Combine(game, "game-version"));
         TestRemovalAndReturn(Path.Combine(game, "removal"));
         TestCatalogInstall(Path.Combine(game, "restore-install"));
         TestLayout(game, args.Length == 2 && args[0] == "--capture" ? args[1] : null);
         Console.WriteLine("LAUNCHER LOGIC TEST PASSED");
         return 0;
+    }
+
+    private static void TestGameVersionGate(string game)
+    {
+        var package = Package("ua.compatible", "1.0.0", "published");
+        var research = Package("ua.research_button", "1.2.7", "");
+        var disabled = Package("ua.disabled", "1.0.0", "");
+        string previous = Path.Combine(game, "mods", "2.4.1.1");
+        string active = Path.Combine(game, "mods", "2.4.2.0");
+        Directory.CreateDirectory(previous);
+        Directory.CreateDirectory(active);
+        package.sha256 = WritePackageFixture(Path.Combine(previous, package.file), "compatible package");
+        disabled.sha256 = WritePackageFixture(Path.Combine(previous, disabled.file + ".manager-off"), "disabled package");
+        string stale = Path.Combine(previous, "ua.research_button_1.2.6.wotmod");
+        File.WriteAllText(stale, "old Quick Research");
+        File.WriteAllText(Path.Combine(previous, research.file), "old Quick Research renamed to the new version");
+        File.WriteAllText(Path.Combine(previous, "local.unknown_1.0.0.wotmod"), "local mod");
+        File.WriteAllText(Path.Combine(previous, "local.txt"), "private sidecar");
+        File.WriteAllText(Path.Combine(game, "version.xml"), "<version.xml><version> v.2.4.2.0 #1000 </version></version.xml>");
+        string gameVersion = Program.DetectGameVersion(game);
+        if (gameVersion != "2.4.2.0")
+            throw new Exception("the client mod directory version was not detected");
+
+        var manifest = new ManifestRoot { game_version = "2.4.1.1", mods = new List<ManifestModEntry> { package, research, disabled } };
+        if (Program.PrepareModCatalog(game, gameVersion, manifest, null).Count != 0 ||
+            Program.PrepareModCatalog(game, gameVersion, null, null).Count != 0 ||
+            Directory.GetFiles(active).Length != 0)
+            throw new Exception("a stale or unavailable release enabled mod changes after the game update");
+
+        manifest.game_version = gameVersion;
+        var catalog = Program.PrepareModCatalog(game, gameVersion, manifest, null);
+        string enabledPath = Path.Combine(active, "published", package.file);
+        string disabledPath = Path.Combine(active, disabled.file + ".manager-off");
+        if (catalog.Count != 3 ||
+            catalog.Single(item => item.Remote == package).LocalFilePath != enabledPath || !File.Exists(enabledPath) ||
+            catalog.Single(item => item.Remote == disabled).IsNew || !File.Exists(disabledPath) ||
+            File.Exists(Path.Combine(active, disabled.file)))
+            throw new Exception("verified packages did not migrate with the published directory and prior enabled state");
+        var pending = Program.FindPendingUpdates(game, gameVersion, manifest, null);
+        if (pending.Count != 1 || pending[0].Remote != research || !pending[0].IsNew ||
+            Directory.GetFiles(active, "*", SearchOption.AllDirectories).Length != 2 || !File.Exists(stale))
+            throw new Exception("stale Quick Research, unknown packages or sidecars were migrated");
+    }
+
+    private static string WritePackageFixture(string path, string content)
+    {
+        File.WriteAllText(path, content);
+        using (var hash = SHA256.Create())
+        using (var stream = File.OpenRead(path))
+            return BitConverter.ToString(hash.ComputeHash(stream)).Replace("-", "");
     }
 
     private static void TestRemovalAndReturn(string game)
@@ -116,9 +167,12 @@ public static class LauncherLogicTest
         Directory.CreateDirectory(legacy);
         File.WriteAllText(Path.Combine(legacy, Path.GetFileName(upscaler)), "historical");
         File.WriteAllText(Path.Combine(legacy, Path.GetFileName(unrelated)), "untouched");
-        File.WriteAllText(Path.Combine(verDir, Path.GetFileName(upscaler)), "historical");
-        File.WriteAllText(Path.Combine(verDir, Path.GetFileName(unrelated)), "untouched");
-        Program.SyncVersionFolderIfEmpty(game, "2.5.0.0", preferences);
+        var removedCopy = Package("net.openwg.gpu.upscaler", "1.0.0", "");
+        removedCopy.sha256 = WritePackageFixture(Path.Combine(verDir, Path.GetFileName(upscaler)), "historical");
+        var unrelatedCopy = Package("unrelated", "1.0.0", "");
+        unrelatedCopy.sha256 = WritePackageFixture(Path.Combine(verDir, Path.GetFileName(unrelated)), "untouched");
+        var migrationManifest = new ManifestRoot { game_version = "2.5.0.0", mods = new List<ManifestModEntry> { removedCopy, unrelatedCopy } };
+        Program.PrepareModCatalog(game, "2.5.0.0", migrationManifest, preferences);
         if (Directory.GetFiles(migrated, Path.GetFileName(upscaler), SearchOption.AllDirectories).Length != 0 ||
             !File.Exists(Path.Combine(migrated, Path.GetFileName(unrelated))))
             throw new Exception("a dismissed mod was migrated into a newer game version");
