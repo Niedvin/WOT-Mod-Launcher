@@ -1,5 +1,8 @@
 (() => {
     const base = document.currentScript.src.replace(/\.js(?:\?.*)?$/, "");
+    const separator = base.lastIndexOf("/");
+    const directory = base.slice(0, separator + 1);
+    const view = base.slice(separator + 1);
     let started = false;
 
     function loadView() {
@@ -19,7 +22,8 @@
             }
         }
         const script = document.createElement("script");
-        script.src = base + (customized ? ".squad.js" : ".stock.js");
+        // Gameface resolves model scope from the JS basename — 2026-11-25
+        script.src = directory + (customized ? "squad/" : "stock/") + view + ".js";
         document.head.appendChild(script);
     }
 

@@ -36,12 +36,13 @@ def build(root):
             archive.writestr('meta.xml', ElementTree.tostring(metadata, encoding='utf-8'))
             archive.write(compiled, 'res/' + resource + 'c')
             for view, part in VIEWS.items():
-                path = UI + view + '/' + view
+                folder = 'res/' + UI + view + '/'
+                entry = view + '.js'
                 with zipfile.ZipFile(root / 'res' / 'packages' / f'gui-part{part}.pkg') as native:
-                    archive.writestr('res/' + path + '.stock.js', native.read(path + '.js'))
-                archive.write(SOURCE / 'bootstrap.js', 'res/' + path + '.js')
-                archive.write(SOURCE / (view + '.js'), 'res/' + path + '.squad.js')
-                archive.write(SOURCE / (view + '.css'), 'res/' + path + '.squad.css')
+                    archive.writestr(folder + 'stock/' + entry, native.read(UI + view + '/' + entry))
+                archive.write(SOURCE / 'bootstrap.js', folder + entry)
+                archive.write(SOURCE / entry, folder + 'squad/' + entry)
+                archive.write(SOURCE / (view + '.css'), folder + view + '.squad.css')
         with zipfile.ZipFile(package) as archive:
             if archive.testzip() is not None:
                 raise ValueError('Corrupt Squad+ package')
