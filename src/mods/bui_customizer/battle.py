@@ -14,6 +14,7 @@ from .overlay import EditorOverlay, TeamStrip
 LOGGER = logging.getLogger('Niedvin/BUI')
 CONSUMER = 'BuiCustomizer'
 MOUSE_BUTTONS = (Keys.KEY_LEFTMOUSE, Keys.KEY_RIGHTMOUSE)
+SHIFT_KEYS = (Keys.KEY_LSHIFT, Keys.KEY_RSHIFT)
 BLOCKED = frozenset((
     'battleLoading', 'fullStats', 'tabScreen', 'radialMenu', 'battleStatisticDataController',
     'battleVehicleConfigurator', 'prebattleAmmunitionPanel', 'fullscreenMap', 'playersPanel',
@@ -96,6 +97,7 @@ class Widget(object):
         self.draw_clip = draw_clip if draw_clip is not None else clip
         self.base = None
         self.applied = None
+        self.scrolled = None
 
     def transform(self):
         return tuple(float(getattr(self.clip, name)) for name in ('x', 'y', 'scaleX', 'scaleY'))
@@ -103,33 +105,73 @@ class Widget(object):
     def write_transform(self, values):
         self.clip.x, self.clip.y, self.clip.scaleX, self.clip.scaleY = values
 
-    def apply(self, target, rect, local):
-        x, y, width, height = rect
-        if local[2] <= 0 or local[3] <= 0:
-            return
+    def track_native_transform(self):
         current = self.transform()
         if self.applied is None:
             self.base = current
         else:
             self.base = tuple(new if abs(new - applied) > 0.001 else base
                               for new, applied, base in zip(current, self.applied, self.base))
-        u, v, w, h = target
-        if max(abs(a - b) for a, b in zip(target, (x, y, width, height))) < 0.25:
+        return current
+
+    def native_rect(self, rect, local):
+        if self.applied is None:
+            return rect
+        x, y, sx, sy = self.track_native_transform()
+        native_x, native_y, native_sx, native_sy = self.base
+        if not sx or not sy or min(local[2:]) <= 0:
+            return rect
+        left, top, width, height = rect
+        return (left + (native_x - x + local[0] * (native_sx - sx)) * width / (sx * local[2]),
+                top + (native_y - y + local[1] * (native_sy - sy)) * height / (sy * local[3]),
+                width * native_sx / sx, height * native_sy / sy)
+
+    def apply(self, target, rect, local):
+        x, y, width, height = rect
+        if min(local[2:]) <= 0:
             return
-        origin_x, origin_y, sx, sy = current
+        origin_x, origin_y, sx, sy = self.track_native_transform()
+        u, v, w, h = target
+        if max(abs(a - b) for a, b in zip(target, rect)) < 0.25:
+            return
         factor_x, factor_y = w / width, h / height
-        parent_x, parent_y = local[2] / width, local[3] / height
-        left = origin_x + (u - x) * parent_x + (local[0] - origin_x) * (1 - factor_x)
-        top = origin_y + (v - y) * parent_y + (local[1] - origin_y) * (1 - factor_y)
+        left = origin_x + (u - x) * sx * local[2] / width + local[0] * sx * (1 - factor_x)
+        top = origin_y + (v - y) * sy * local[3] / height + local[1] * sy * (1 - factor_y)
         self.write_transform((left, top, sx * factor_x, sy * factor_y))
         self.applied = self.transform()
 
     def restore(self):
+        self.clear_crop()
         if self.applied is not None:
             current = self.transform()
             self.write_transform(tuple(base if abs(value - applied) <= 0.001 else value
                                        for value, applied, base in zip(current, self.applied, self.base)))
         self.base = self.applied = None
+
+    def apply_crop(self, local, crop):
+        clip = self.clip
+        original = clip.scrollRect
+        viewport = clip.getBounds(clip)
+        viewport.x, viewport.y, viewport.width, viewport.height = layout.crop_rect(local, crop)
+        origin_x, origin_y = (float(original.x), float(original.y)) if original is not None else (0, 0)
+        x, y, sx, sy = self.transform()
+        # Flash scrollRect shifts the displayed content by its local origin — 2026-11-26
+        left = x + (float(viewport.x) - origin_x) * sx
+        top = y + (float(viewport.y) - origin_y) * sy
+        clip.scrollRect = viewport
+        self.scrolled = (original, (x, y), (left, top))
+        clip.x, clip.y = left, top
+
+    def clear_crop(self):
+        if self.scrolled is None:
+            return
+        original, before, after = self.scrolled
+        self.scrolled = None
+        clip = self.clip
+        clip.scrollRect = original
+        x, y = self.transform()[:2]
+        clip.x = before[0] if abs(x - after[0]) <= .001 else x
+        clip.y = before[1] if abs(y - after[1]) <= .001 else y
 
 
 class BattleLayout(object):
@@ -144,6 +186,7 @@ class BattleLayout(object):
         self.native = {}
         self.editor = EditorOverlay()
         self.bounds = {}
+        self.full_bounds = {}
         self.hit_bounds = {}
         self.focus_key = None
         self.native_visible = set()
@@ -164,13 +207,7 @@ class BattleLayout(object):
             return
         # Scaleform Python returns no stage on the battle page itself — 2026-11-18
         self.stage = root
-        panel = getattr(root, 'playersPanel', None)
-        if panel is not None:
-            for key, attr in (('allies', 'listLeft'), ('enemies', 'listRight')):
-                clip = getattr(panel, attr, None)
-                if clip is not None:
-                    self.add_widget(key, clip, self.list_renderers(clip))
-            self.add_widget('panelSwitch', getattr(panel, 'panelSwitch', None))
+        self.refresh_rosters(root)
         postmortem = root.getChildByName(b'postmortemPanelUI')
         rating_host = postmortem.getChildByName(b'postmortemInfoPanel') if postmortem is not None else None
         if rating_host is not None and getattr(rating_host, 'numChildren', 0):
@@ -196,6 +233,15 @@ class BattleLayout(object):
                     if draw_clip is None:
                         continue
                 self.add_widget(key, clip, draw_clip)
+
+    def refresh_rosters(self, root):
+        panel = root.getChildByName(b'playersPanel') or getattr(root, 'playersPanel', None)
+        if panel is not None:
+            for key, attr in (('allies', 'listLeft'), ('enemies', 'listRight')):
+                clip = getattr(panel, attr, None)
+                if clip is not None:
+                    self.add_widget(key, clip, self.list_renderers(clip))
+            self.add_widget('panelSwitch', getattr(panel, 'panelSwitch', None))
 
     @staticmethod
     def list_renderers(clip):
@@ -236,8 +282,9 @@ class BattleLayout(object):
     def restore_list(self, key):
         native = self.native.pop(key, None)
         if native:
-            clip, alpha, mouse_enabled, mouse_children = native
+            alpha, mouse_enabled, mouse_children = native
             try:
+                clip = self.widgets[key].clip
                 clip.alpha = alpha
                 clip.mouseEnabled = mouse_enabled
                 clip.mouseChildren = mouse_children
@@ -246,35 +293,57 @@ class BattleLayout(object):
         self.strips[key].hide()
 
     def show_list(self, key, clip):
-        original = self.native.get(key)
-        if original is None:
-            self.native[key] = (clip, clip.alpha, clip.mouseEnabled, clip.mouseChildren)
-        else:
-            self.native[key] = (clip,) + original[1:]
-        clip.alpha = 0
-        clip.mouseEnabled = False
-        clip.mouseChildren = False
+        try:
+            alpha, mouse_enabled, mouse_children = clip.alpha, clip.mouseEnabled, clip.mouseChildren
+            if key not in self.native:
+                self.native[key] = (alpha, mouse_enabled, mouse_children)
+            if mouse_enabled:
+                clip.mouseEnabled = False
+            if mouse_children:
+                clip.mouseChildren = False
+            if alpha:
+                clip.alpha = 0
+            return True
+        except AttributeError:
+            self.next_scan = 0
+            self.restore_list(key)
+            return False
 
     def preset(self, key, mode):
         return self.state['elements'].get(key, {}).get(mode)
 
+    def crop(self, key, mode):
+        if self.drag and self.drag['key'] == key and self.drag['mode'] == mode and 'crop' in self.drag:
+            return self.drag['crop']
+        return tuple(self.preset(key, mode + 'Crop') or layout.NO_CROP)
+
     def controls_equipment_position(self):
-        return (self.preset('consumablesPanel', 'slots') is not None or
+        saved = self.preset('consumablesPanel', 'slots')
+        return (saved is not None and saved[0] is not None or
                 self.drag is not None and self.drag['key'] == 'consumablesPanel')
 
-    def target(self, key, mode, original):
-        if self.drag is not None and self.drag['key'] == key and self.drag['mode'] == mode:
+    def target(self, key, mode, original, crop):
+        if self.drag and self.drag['key'] == key and self.drag['mode'] == mode and 'crop' not in self.drag:
             return self.drag['target']
         saved = self.preset(key, mode)
-        return layout.denormalize(saved, self.screen) if saved is not None else original
+        if saved is None:
+            return layout.clip_rect(original, self.screen, 1, crop) if any(crop) else original
+        size_axis = None
+        if key == 'consumablesPanel':
+            size_axis = 'height'
+        elif key in layout.TEAMS and mode == 'normal':
+            size_axis = 'fit'
+        return layout.denormalize(saved, self.screen, original, size_axis, key == 'enemies', crop)
 
     def update_visibility(self):
         self.native_visible = set(self.page.as_getComponentsVisibilityS() or ())
 
     def render_layout(self):
         self.bounds.clear()
+        self.full_bounds.clear()
         self.hit_bounds.clear()
         self.update_visibility()
+        self.refresh_rosters(self.stage)
         self.render_teams()
         self.render_widgets(self.active)
 
@@ -287,10 +356,18 @@ class BattleLayout(object):
                 self.restore_list(key)
                 continue
             widget.restore()
-            target = self.target(key, 'top', strip.default_rect(self.screen, len(rows[key])))
-            strip.update(rows[key], target, self.screen)
-            self.show_list(key, widget.clip)
-            self.bounds[key] = target
+            if not self.show_list(key, widget.clip):
+                continue
+            crop = self.crop(key, 'top')
+            target = self.target(key, 'top', strip.default_rect(self.screen, len(rows[key])), crop)
+            visible = layout.crop_rect(target, crop)
+            try:
+                strip.update(rows[key], target, self.screen, visible if any(crop) else None)
+            except Exception:
+                self.restore_list(key)
+                raise
+            self.full_bounds[key] = target
+            self.bounds[key] = visible
 
     def on_screen(self, key, clip):
         alias = 'playersPanel' if key in layout.TEAMS or key == 'panelSwitch' else key
@@ -330,12 +407,15 @@ class BattleLayout(object):
             rect = self.region_bounds(key, clip, self.stage)
             if rect is None:
                 continue
-            _, _, width, height = rect
+            native = rect
+            if widget.applied is not None and dynamic:
+                native = widget.native_rect(rect, self.region_bounds(key, clip, widget.clip))
+            _, _, width, height = native
             if not (width > 0 and height > 0 and width <= sw * 1.15 and height <= sh * 1.15):
                 continue
             if width > sw * 0.82 and height > sh * 0.82:
                 continue
-            if key in ('minimap', 'consumablesPanel') or self.intersects_screen(rect):
+            if key in ('minimap', 'consumablesPanel') or self.intersects_screen(native):
                 found.append((clip, rect))
         return found
 
@@ -350,18 +430,20 @@ class BattleLayout(object):
             if not isinstance(getattr(clip, 'text', None), basestring):
                 continue
             rect = flash_bounds(clip, self.stage)
-            if min(rect[2:]) > 0 and self.intersects_screen(rect):
+            if min(rect[2:]) > 0:
                 regions.append(rect)
         return regions
 
     def render_widgets(self, edited):
         hud_visible = self.page.isGuiVisible() and not self.page._isBattleLoading
         for key, widget in self.widgets.items():
+            widget.clear_crop()
             if not hud_visible or key in self.native:
                 continue
             mode = layout.normal_mode(key)
             saved = self.preset(key, mode)
-            if saved is None and not edited:
+            crop = self.crop(key, mode)
+            if saved is None and not edited and not any(crop):
                 continue
             if key == 'consumablesPanel':
                 displayed = self.stage.getChildByName(b'consumablesPanel')
@@ -378,12 +460,16 @@ class BattleLayout(object):
             rect = enclosing_rect(regions)
             if min(rect[2:]) <= 4:
                 continue
-            if (key not in layout.ALWAYS_VISIBLE and rect[2] > self.screen[0] * 0.82
+            if (widget.applied is None and key not in layout.ALWAYS_VISIBLE and rect[2] > self.screen[0] * 0.82
                     and rect[3] > self.screen[1] * 0.82):
                 continue
-            target = self.target(key, mode, rect)
+            original = rect
+            if (saved is not None and (saved[0] is None or key == 'consumablesPanel') and
+                    widget.applied is not None):
+                original = widget.native_rect(rect, self.local_region(key, widget, clips))
+            target = self.target(key, mode, original, crop)
             if target != rect:
-                local = self.parent_region(key, widget, clips, rect)
+                local = self.local_region(key, widget, clips)
                 widget.apply(target, rect, local)
                 if key == 'consumablesPanel':
                     regions = tuple(area for _, area in self.widget_geometry(key, widget))
@@ -396,21 +482,30 @@ class BattleLayout(object):
                 if key in ('minimap', 'consumablesPanel') and not self.intersects_screen(rect):
                     widget.restore()
                     continue
+            self.full_bounds[key] = rect
+            if any(crop):
+                widget.apply_crop(self.local_region(key, widget, clips), crop)
+                rect = layout.crop_rect(rect, crop)
+                regions = (rect,)
             if self.intersects_screen(rect):
                 if key == 'battleMessenger':
-                    regions = self.chat_hit_regions(widget)
-                    if not regions:
+                    chat_regions = self.chat_hit_regions(widget)
+                    if not chat_regions:
                         continue
+                    if not any(crop):
+                        regions = chat_regions
                 self.bounds[key] = rect
-                self.hit_bounds[key] = (rect,) if key in ('postmortemPanel', 'consumablesPanel') else regions
+                if (key in ('postmortemPanel', 'consumablesPanel') or
+                        not any(self.intersects_screen(region) for region in regions)):
+                    regions = (rect,)
+                self.hit_bounds[key] = regions
 
-    def parent_region(self, key, widget, clips, stage_rect):
+    def local_region(self, key, widget, clips):
         if key == 'consumablesPanel':
-            return stage_rect
-        parent = widget.clip.parent
-        if parent is None:
-            return stage_rect
-        return enclosing_rect([self.region_bounds(key, clip, parent) for clip in clips])
+            left, top, width, height = enclosing_rect([flash_bounds(clip, self.stage) for clip in clips])
+            x, y, sx, sy = widget.transform()
+            return (left - x) / sx, (top - y) / sy, width / sx, height / sy
+        return enclosing_rect([self.region_bounds(key, clip, widget.clip) for clip in clips])
 
     def pointer(self):
         position = GUI.mcursor().position
@@ -421,14 +516,14 @@ class BattleLayout(object):
         x, y = point
         focused = self.bounds.get(self.focus_key)
         if focused is not None and layout.inside(focused, x, y, layout.HIT_EDGE):
-            grip = layout.edges(focused, x, y)
+            grip = layout.edges(focused, x, y, self.screen)
             if grip != (0, 0):
                 return self.focus_key, focused, grip
         hits = []
         for key, rect in self.bounds.items():
             if any(layout.inside(region, x, y, layout.HIT_EDGE)
                    for region in self.hit_bounds.get(key, (rect,))):
-                grip = layout.edges(rect, x, y)
+                grip = layout.edges(rect, x, y, self.screen)
                 hits.append((grip == (0, 0), rect[2] * rect[3], key, rect, grip))
         if not hits:
             return None, None, (0, 0)
@@ -446,13 +541,19 @@ class BattleLayout(object):
             return
         drag = self.drag
         dx, dy = point[0] - drag['start'][0], point[1] - drag['start'][1]
+        if 'crop' in drag:
+            drag['crop'] = layout.adjust_crop(drag['rect'], drag['original_crop'], drag['grip'], dx, dy)
+            return
         if abs(dx) < 1 and abs(dy) < 1 and drag['target'] == drag['rect']:
             return
         minimum = 38 if drag['mode'] == 'top' else layout.MIN_EDGE
         maximum = None
         if drag['key'] in ('postmortemPanel', 'postmortemInfoPage'):
             maximum = tuple(int(size * limit) for size, limit in zip(self.screen, layout.POSTMORTEM_LIMIT))
-        drag['target'] = layout.adjust(drag['rect'], drag['grip'], dx, dy, self.screen, minimum, maximum)
+        proportional = drag['mode'] == 'slots' or drag['key'] in layout.TEAMS and drag['mode'] == 'normal'
+        crop = self.crop(drag['key'], drag['mode'])
+        drag['target'] = layout.adjust(drag['rect'], drag['grip'], dx, dy, self.screen,
+                                       minimum, maximum, proportional, crop)
 
     def end_drag(self, save):
         drag = self.drag
@@ -460,13 +561,43 @@ class BattleLayout(object):
         if drag is None:
             return
         key = drag['key']
+        if 'crop' in drag:
+            self.end_crop(drag, save)
+            return
         if save and drag['target'] != drag['rect']:
+            mode = drag['mode']
+            preset = layout.normalize(drag['target'], self.screen)
+            if mode == 'slots' and drag['grip'] == (0, 0):
+                previous = self.preset(key, mode)
+                preset[2:] = previous[2:] if previous is not None else (None, None)
             changes = {name: dict(value) for name, value in self.state['elements'].items()}
-            changes.setdefault(key, {})[drag['mode']] = layout.normalize(drag['target'], self.screen)
+            changes.setdefault(key, {})[mode] = preset
             if self.save(dict(self.state, elements=changes)):
                 return
         if drag['mode'] == layout.normal_mode(key) and self.preset(key, drag['mode']) is None:
             self.widgets[key].restore()
+        self.next_layout = 0
+
+    def end_crop(self, drag, save):
+        key, mode, crop = drag['key'], drag['mode'] + 'Crop', drag['crop']
+        if save and crop != drag['original_crop']:
+            changes = dict(self.state['elements'])
+            saved = dict(changes.get(key, {}))
+            if any(crop):
+                saved[mode] = list(crop)
+            else:
+                saved.pop(mode, None)
+            if saved:
+                changes[key] = saved
+            else:
+                changes.pop(key, None)
+            self.save(dict(self.state, elements=changes))
+        if drag['mode'] != 'top' and not any(self.crop(key, drag['mode'])):
+            widget = self.widgets[key]
+            if self.preset(key, drag['mode']) is None:
+                widget.restore()
+            else:
+                widget.clear_crop()
         self.next_layout = 0
 
     def save(self, state):
@@ -483,6 +614,21 @@ class BattleLayout(object):
         current = self.state['top']
         self.save(dict(self.state, top=[team for team in current if team != key]
                        if key in current else current + [key]))
+
+    def reset_position(self, key):
+        mode = 'top' if key in self.native else layout.normal_mode(key)
+        saved = self.preset(key, mode)
+        if saved is not None and saved[0] is not None:
+            changes = dict(self.state['elements'])
+            changes[key] = dict(changes[key])
+            if saved[2] is None:
+                del changes[key][mode]
+                if not changes[key]:
+                    del changes[key]
+            else:
+                changes[key][mode] = [None, None] + list(saved[2:])
+            if self.save(dict(self.state, elements=changes)) and saved[2] is None:
+                self.widgets[key].restore()
 
     def enter(self):
         if not self.active:
@@ -534,6 +680,10 @@ class BattleLayout(object):
             return True
         if not self.active:
             return False
+        if key in SHIFT_KEYS:
+            if down:
+                self.block_release.add(key)
+            return True
         if key == Keys.KEY_ESCAPE and down:
             self.leave(False)
             return True
@@ -547,22 +697,30 @@ class BattleLayout(object):
             point = self.pointer()
             if self.drag is not None:
                 return True
-            if key == Keys.KEY_LEFTMOUSE and self.editor.menu_hit(point):
-                team = self.editor.team
+            action = self.editor.menu_hit(point) if key == Keys.KEY_LEFTMOUSE else None
+            if action is not None:
+                target = self.editor.menu_key
                 self.editor.close_menu()
-                self.toggle_top(team)
+                if action == 'dock':
+                    self.toggle_top(target)
+                else:
+                    self.reset_position(target)
                 return True
             self.editor.close_menu()
             self.render_layout()
             if key == Keys.KEY_RIGHTMOUSE:
-                team = self.pick_team(point)
-                if team is not None:
-                    self.editor.open_menu(team, team in self.state['top'], point, self.screen, self.bounds[team])
+                target = self.pick_team(point) or self.pick(point)[0]
+                if target is not None:
+                    self.editor.open_menu(target, target in self.state['top'], point, self.screen, self.bounds[target])
             else:
                 target, rect, grip = self.pick(point)
                 if target is not None:
                     mode = 'top' if target in self.native else layout.normal_mode(target)
-                    self.drag = dict(key=target, mode=mode, rect=rect, target=rect, grip=grip, start=point)
+                    full = self.full_bounds.get(target, rect)
+                    self.drag = dict(key=target, mode=mode, rect=full, target=full, grip=grip, start=point)
+                    if grip != (0, 0) and any(BigWorld.isKeyDown(shift) for shift in SHIFT_KEYS):
+                        crop = self.crop(target, mode)
+                        self.drag.update(crop=crop, original_crop=crop)
         return True
 
     def can_edit(self):
@@ -624,6 +782,7 @@ class BattleLayout(object):
         if self.active:
             if self.drag is not None:
                 rect, grip = self.drag['target'], self.drag['grip']
+                rect = layout.crop_rect(rect, self.crop(self.drag['key'], self.drag['mode']))
             else:
                 self.focus_key, rect, grip = self.pick(point)
             self.editor.highlight(rect, screen, grip)

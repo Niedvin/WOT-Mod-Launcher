@@ -26,7 +26,7 @@ PALETTE = {
     'enemies': (130, 44, 38, 245),
     'focus': (109, 193, 255, 250),
 }
-MENU_TEXTURES = ('menu_side.png', 'menu_top.png')
+MENU_TEXTURES = ('menu_side.png', 'menu_top.png', 'menu_reset.png')
 RATING_VIEW = 'gui/gameface/_dist/production/battle/postmortem_panel/PostmortemPanelView/PostmortemPanelView.html'
 RATING_SCRIPT = 'gui/gameface/mods/niedvin/bui/rating.js'
 RESIZE_ICONS = {

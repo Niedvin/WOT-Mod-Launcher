@@ -1,6 +1,6 @@
 from __future__ import unicode_literals
 
-from collections import namedtuple
+from contextlib import contextmanager
 import sys
 import types
 import unittest
@@ -15,6 +15,9 @@ try:
     sys.modules['Keys'].KEY_LEFTMOUSE = 1
     sys.modules['Keys'].KEY_RIGHTMOUSE = 2
     sys.modules['Keys'].KEY_ESCAPE = 3
+    sys.modules['Keys'].KEY_LSHIFT = 42
+    sys.modules['Keys'].KEY_RSHIFT = 54
+    sys.modules['BigWorld'].isKeyDown = lambda key: False
     sys.modules['gui.ua_mod_manager.manager'].read_json = lambda path: {}
     sys.modules['gui.ua_mod_manager.manager'].write_json = lambda path, state: None
     sys.modules['gui.ua_mod_manager.bindings'].binding_for = lambda identifier, fallback: fallback
@@ -37,7 +40,9 @@ finally:
             sys.modules[name] = module
 
 
-Bounds = namedtuple('Bounds', 'x y width height')
+class Bounds(object):
+    def __init__(self, x, y, width, height):
+        self.x, self.y, self.width, self.height = x, y, width, height
 
 
 class Clip(object):
@@ -47,6 +52,7 @@ class Clip(object):
         self.scaleX = self.scaleY = 1.0
         self.visible = True
         self.alpha = 1.0
+        self.scrollRect = None
         self.width, self.height = width, height
         self.children = []
         if parent is not None:
@@ -183,6 +189,14 @@ class BattleLayoutTest(unittest.TestCase):
         self.render()
         self.assertNotIn('battleMessenger', self.hud.bounds)
 
+    def test_chat_remains_selectable_when_its_text_is_past_an_edge(self):
+        chat = self.add('battleMessenger', y=250, width=325, height=390)
+        line = Clip(chat, x=8, y=367, width=95, height=17)
+        line.text = 'Battle message'
+        self.hud.state['elements']['battleMessenger'] = {'normal': [-.26, .3, .325, .4875]}
+        self.render()
+        self.assertEqual(self.hud.pick((20, 400))[0], 'battleMessenger')
+
     def test_consumables_use_visible_slot_bounds_and_discard_old_container_preset(self):
         panel = self.add('consumablesPanel', x=350, y=650, width=430, height=310)
         slot = Clip(panel, x=10, y=120, width=50, height=200)
@@ -196,6 +210,35 @@ class BattleLayoutTest(unittest.TestCase):
         self.render()
         self.assertEqual(self.hud.bounds['consumablesPanel'], (360, 770, 50, 60))
         self.assertIsNone(self.hud.pick((420, 705))[0])
+
+    def test_moved_equipment_keeps_natural_slot_size_when_layout_grows(self):
+        panel = self.add('consumablesPanel', x=350, y=700)
+        for i in range(3):
+            Clip(Clip(panel, x=50 * i), width=50, height=50).name = b'hit'
+        self.render()
+        original = self.hud.bounds['consumablesPanel']
+        self.hud.drag = dict(key='consumablesPanel', mode='slots', rect=original, target=original,
+                             grip=(0, 0), start=(400, 725))
+        self.hud.update_drag((100, 525))
+        self.hud.end_drag(True)
+        saved = self.hud.preset('consumablesPanel', 'slots')
+        self.assertEqual(saved, [.05, .625, None, None])
+        self.assertTrue(layout.valid_preset('consumablesPanel', saved))
+        self.render()
+        for i in range(3, 7):
+            Clip(Clip(panel, x=50 * i), width=50, height=50).name = b'hit'
+        self.render()
+        self.assertEqual(self.hud.bounds['consumablesPanel'], (50, 500, 350, 50))
+        self.assertEqual((panel.scaleX, panel.scaleY), (1, 1))
+
+    def test_legacy_equipment_layout_preserves_position_and_recovers_slot_proportions(self):
+        panel = self.add('consumablesPanel', x=350, y=700)
+        for i in range(7):
+            Clip(Clip(panel, x=50 * i), width=50, height=50).name = b'hit'
+        self.hud.state['elements']['consumablesPanel'] = {'slots': [.05, .625, .15, .0625]}
+        self.render()
+        self.assertEqual(self.hud.bounds['consumablesPanel'], (50, 500, 350, 50))
+        self.assertEqual((panel.scaleX, panel.scaleY), (1, 1))
 
     def test_rating_hit_rect_excludes_the_gameface_viewport(self):
         self.hud.page._isInPostmortem = True
@@ -349,6 +392,114 @@ class BattleLayoutTest(unittest.TestCase):
         self.assertTrue(self.hud.handle_key(battle.Keys.KEY_LEFTMOUSE, False))
         self.assertEqual(self.hud.state['elements']['damagePanel']['normal'], [0.76, 0.75, 0.24, 0.25])
 
+    def test_side_roster_resize_preserves_proportions_and_opposite_corner(self):
+        panel = self.add('allies', x=100, y=100)
+        self.hud.native_visible.add('playersPanel')
+        rows = Clip(panel, x=15, y=12, width=150, height=300)
+        self.hud.add_widget('allies', panel, rows)
+        self.render()
+        original = self.hud.bounds['allies']
+        self.hud.drag = dict(key='allies', mode='normal', rect=original, target=original,
+                             grip=(1, 0), start=(265, 200))
+        self.hud.update_drag((340, 200))
+        self.render()
+        self.assertEqual(self.hud.bounds['allies'], (115, 112, 225, 450))
+        self.hud.end_drag(True)
+        self.render()
+        self.assertEqual(panel.scaleX, panel.scaleY)
+
+    def test_offscreen_limits_preserve_visible_area_on_every_edge_and_at_corners(self):
+        screen = self.hud.screen
+        rect = (100, 100, 200, 100)
+        for dx, dy, expected in ((-2000, 0, (-170, 100)), (2000, 0, (970, 100)),
+                                 (0, -2000, (100, -85)), (0, 2000, (100, 785))):
+            moved = layout.adjust(rect, (0, 0), dx, dy, screen, 24)
+            self.assertEqual(moved, expected + rect[2:])
+            self.assertEqual(layout.denormalize(layout.normalize(moved, screen), screen), moved)
+        x, y, w, h = layout.adjust(rect, (0, 0), -2000, -2000, screen, 24)
+        self.assertAlmostEqual((x + w) * (y + h), w * h * .15)
+        self.assertGreater(w, 0)
+        self.assertGreater(h, 0)
+
+    def test_offscreen_widget_keeps_all_children_in_its_measured_region(self):
+        panel = self.add('ribbonsPanel', x=200, y=100)
+        Clip(panel, width=100, height=100)
+        Clip(panel, x=100, width=100, height=100)
+        self.hud.state['elements']['ribbonsPanel'] = {'normal': [-.17, .125, .2, .125]}
+        for _ in range(3):
+            self.render()
+            self.assertEqual(self.hud.bounds['ribbonsPanel'], (-170, 100, 200, 100))
+            self.assertEqual(self.hud.pick((10, 150))[0], 'ribbonsPanel')
+        resized = layout.adjust(self.hud.bounds['ribbonsPanel'], (1, 0), -200, 0, self.hud.screen, 24)
+        self.assertGreaterEqual((resized[0] + resized[2]) / resized[2], .15 - 1e-6)
+
+    def test_reset_menu_restores_base_position_and_retains_size(self):
+        panel = self.add('damagePanel', x=200, y=150, width=100, height=100)
+        self.hud.state['elements'] = {'damagePanel': {'normal': [.5, .5, .2, .25]},
+                                      'debugPanel': {'normal': [.2, .3, .2, .2]}}
+        self.hud.active = True
+        self.hud.pointer = lambda: (550, 450)
+        with self.fake_menu_surfaces():
+            self.click(battle.Keys.KEY_RIGHTMOUSE)
+            x, y, w, h = self.hud.editor.menu_rect
+            self.hud.pointer = lambda: (x + w / 2, y + h / 2)
+            self.click(battle.Keys.KEY_LEFTMOUSE)
+        self.hud.render_layout()
+        self.assertEqual(self.hud.bounds['damagePanel'], (200, 150, 200, 200))
+        preset = self.hud.preset('damagePanel', 'normal')
+        self.assertEqual(preset, [None, None, .2, .25])
+        self.assertTrue(layout.valid_preset('damagePanel', preset))
+        self.assertEqual(self.hud.state['elements']['debugPanel']['normal'], [.2, .3, .2, .2])
+        panel.x = 300
+        self.hud.render_layout()
+        self.assertEqual(self.hud.bounds['damagePanel'], (300, 150, 200, 200))
+
+    def test_scaled_parent_preserves_widget_local_origin_when_position_is_reset(self):
+        parent = Clip(self.hud.stage, x=50, y=20)
+        parent.scaleX, parent.scaleY = 2, 1.5
+        panel = Clip(parent, x=100, y=60)
+        rows = Clip(panel, x=10, y=20, width=150, height=200)
+        self.hud.add_widget('allies', panel, rows)
+        self.hud.native_visible.add('playersPanel')
+        self.hud.state['elements']['allies'] = {'normal': [.3, .25, .45, .5625]}
+        self.render()
+        self.assertEqual(self.hud.bounds['allies'], (300, 200, 450, 450))
+        self.hud.reset_position('allies')
+        self.render()
+        self.assertEqual(self.hud.bounds['allies'], (270, 140, 450, 450))
+
+    def test_shift_drag_crops_without_changing_scale_and_can_restore_the_edge(self):
+        panel = self.add('damagePanel', x=200, y=100, width=300, height=200)
+        self.hud.active = True
+        held, battle.BigWorld.isKeyDown = battle.BigWorld.isKeyDown, lambda key: key == battle.Keys.KEY_LSHIFT
+        try:
+            self.assertTrue(self.hud.handle_key(battle.Keys.KEY_LSHIFT, True))
+            self.hud.pointer = lambda: (200, 190)
+            self.assertTrue(self.hud.handle_key(battle.Keys.KEY_LEFTMOUSE, True))
+            self.hud.pointer = lambda: (290, 190)
+            self.assertTrue(self.hud.handle_key(battle.Keys.KEY_LEFTMOUSE, False))
+            self.hud.render_layout()
+            self.assertEqual(self.hud.bounds['damagePanel'], (290, 100, 210, 200))
+            self.assertEqual((panel.scaleX, panel.scaleY), (1, 1))
+            self.assertEqual((panel.scrollRect.x, panel.scrollRect.width), (90, 210))
+            self.assertTrue(layout.valid_crop(self.hud.preset('damagePanel', 'normalCrop')))
+            self.assertTrue(self.hud.handle_key(battle.Keys.KEY_LEFTMOUSE, True))
+            self.hud.pointer = lambda: (190, 190)
+            self.hud.update_drag(self.hud.pointer())
+            self.hud.end_drag(True)
+            self.assertIsNone(panel.scrollRect)
+            self.assertTrue(self.hud.handle_key(battle.Keys.KEY_LEFTMOUSE, False))
+            self.hud.render_layout()
+            self.assertEqual(self.hud.bounds['damagePanel'], (200, 100, 300, 200))
+            self.hud.active = False
+            self.assertTrue(self.hud.handle_key(battle.Keys.KEY_LSHIFT, False))
+        finally:
+            battle.BigWorld.isKeyDown = held
+
+    def click(self, key):
+        self.assertTrue(self.hud.handle_key(key, True))
+        self.assertTrue(self.hud.handle_key(key, False))
+
     def test_resize_indicator_tracks_grip_and_stays_on_screen(self):
         created = []
         old_quad = overlay.quad
@@ -382,17 +533,26 @@ class BattleLayoutTest(unittest.TestCase):
         finally:
             overlay.quad = old_quad
 
-    def test_roster_menu_uses_drawn_labels_for_both_directions(self):
+    @contextmanager
+    def fake_menu_surfaces(self):
         textures = []
         original = overlay.quad
+
         def quad(texture, depth):
-            textures.append(texture)
+            textures.append(texture.rsplit('/', 1)[-1])
             surface = Clip()
             surface.place = lambda *args: None
             surface.close = lambda: None
             return surface
+
         overlay.quad = quad
         try:
+            yield textures
+        finally:
+            overlay.quad = original
+
+    def test_roster_menu_uses_drawn_labels_for_both_directions(self):
+        with self.fake_menu_surfaces() as textures:
             editor = self.hud.editor
             editor.open_menu('allies', False, (20, 60), self.hud.screen, (0, 40, 200, 210))
             x, y, w, h = editor.menu_rect
@@ -403,11 +563,9 @@ class BattleLayoutTest(unittest.TestCase):
             self.assertLess(x + w, 750)
             editor.open_menu('allies', True, (20, 60), self.hud.screen, (0, 49, 420, 40))
             self.assertGreater(editor.menu_rect[1], 89)
-            self.assertEqual([path.rsplit('/', 1)[-1] for path in textures],
-                             ['menu_top.png', 'menu_top.png', 'menu_side.png'])
-
-        finally:
-            overlay.quad = original
+            self.assertEqual(editor.menu_hit((editor.menu_rect[0] + 4, editor.menu_rect[1] + 40)), 'reset')
+            self.assertEqual(textures, ['menu_top.png', 'menu_reset.png', 'menu_top.png', 'menu_reset.png',
+                                        'menu_side.png', 'menu_reset.png'])
 
     def test_roster_label_keeps_vehicle_identity_when_bitmap_lacks_glyphs(self):
         self.assertEqual(overlay.roster_name('\u0406\u0421-7'), 'IS-7')
@@ -427,8 +585,8 @@ class BattleLayoutTest(unittest.TestCase):
                 self.rect = rect
 
         make_quad, make_label = overlay.quad, overlay.label
-        overlay.quad = lambda texture, depth: Part()
-        overlay.label = lambda text, depth: Part(text)
+        overlay.quad = lambda texture, depth, parent=None: Part()
+        overlay.label = lambda text, depth, parent=None: Part(text)
         try:
             card = overlay.TankCard((7, 'Maus', 10, 'germany-G42_Maus', 1.0), 'allies')
             card.render((100, 50, 74, 36), self.hud.screen, .25)
